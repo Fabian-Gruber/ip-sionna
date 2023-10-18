@@ -12,9 +12,9 @@ def __main__():
     block_length = 1024
     ebno_db_min = -3.0 # Minimum value of Eb/N0 [dB] for simulations
     ebno_db_max = 5.0 # Maximum value of Eb/N0 [dB] for simulations
-    batch_size = 2000 # How many examples are processed by Sionna in parallel
+    batch_size = 1 # How many examples are processed by Sionna in parallel
     
-    uncoded_e2e_model = e2e.end2endModel(num_bits_per_symbol=num_bits_per_symbol, block_length=block_length)
+    uncoded_e2e_model = e2e(num_bits_per_symbol=num_bits_per_symbol, block_length=block_length)
     
     ber_plots = sn.utils.PlotBER("Uncoded BER")
     ber_plots.simulate(

@@ -4,12 +4,12 @@ except AttributeError:
     import sionna as sn
 import tensorflow as tf
 
-from .channels import cond_normal_channel as cnc
+from channels import cond_normal_channel as cnc
 
-from .estimators import ls_estimator as lse
-from .estimators import genie_mmse_estimator as gme
+from estimators import ls_estimator as lse
+from estimators import genie_mmse_estimator as gme
 
-from .equalizers import equalizer as eq
+from equalizers import equalizer as eq
 
 
 class end2endModel(tf.keras.Model):
@@ -42,22 +42,26 @@ class end2endModel(tf.keras.Model):
 
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
         x = self.mapper(bits)
-        x[0] = tf.cast(1.0, x[0].dtype)
-                
-        y_p, h, C, n = self.channel(x[0], no)
         
-        h_hat_ls = self.ls_estimator(h, x[0])
+        pilot = tf.constant(1.0, dtype=tf.float32)
+                        
+        y_p, h, C, n = self.channel(pilot, no)
         
-        h_hat_mmse = self.mmse_estimator(y_p, no, C, x[0])
+        h_hat_ls = self.ls_estimator(h, pilot)
+        
+        h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
         
         #uplink phase
         
-        #x_data = all x except first one
-        x_data = x[1:]
-        
-        for i in range(len(x_data)):
+        #x_data = all x except x[0][0] (x has shape (1, 512))
+        x_data = x[:, 1:]
+                
+        y = []
+                
+        for i in range(tf.shape(x_data)[1]):
             #y = h * x + n for all x except first one
-            y, _, _ = self.channel(x_data[i], no)
+            y_i = self.channel(x_data[0][i], no)
+            y.append(y_i)
         
         x_hat_ls, no_ls_new = self.equalizer(h_hat_ls, y, n)
         
