@@ -2,7 +2,7 @@ from .scm_multi import SCMMulti
 from scipy.linalg import toeplitz
 import numpy as np
 
-def channel_generation():
+def channel_generation(batch_size, n_coherences, n_antennas):
     """
     SIMO version.
     """
@@ -11,9 +11,6 @@ def channel_generation():
     channel = SCMMulti(path_sigma=path_sigma, n_path=n_path)
 
     # generate channel samples with certain batch size
-    batch_size = 20
-    n_coherences = 1
-    n_antennas = 32
     rng = np.random.default_rng(1235428719812346)
 
     h, t = channel.generate_channel(batch_size, n_coherences, n_antennas, rng)
