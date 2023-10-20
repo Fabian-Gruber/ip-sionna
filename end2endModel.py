@@ -44,10 +44,8 @@ class end2endModel(tf.keras.Model):
 
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
         x = self.mapper(bits)
-        
-        print('shape of bits: ', bits.shape)
-                        
-        pilot = tf.constant(1.0, dtype='complex64')
+                                
+        pilot = tf.ones((batch_size, 1, 1), dtype=tf.complex64)
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
         
@@ -66,8 +64,8 @@ class end2endModel(tf.keras.Model):
         x_hat_mmse = []
         no_ls_new = []
         no_mmse_new = []
-        llr_ls = tf.zeros((1, 2, 0), dtype=tf.float32)
-        llr_mmse = tf.zeros((1, 2, 0), dtype=tf.float32)
+        llr_ls = tf.zeros((batch_size, 2, 0), dtype=tf.float32)
+        llr_mmse = tf.zeros((batch_size, 2, 0), dtype=tf.float32)
                 
         for i in range(tf.shape(x_data)[1]):
             #y = h * x + n for all x except first one
@@ -83,10 +81,10 @@ class end2endModel(tf.keras.Model):
             no_mmse_new.append(no_mmse_new_i)
             
             llr_ls_i = self.demapper([x_hat_ls_i, no_ls_new_i])
-            llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (1, 2, 1))], axis=2)
+            llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (batch_size, 2, 1))], axis=2)
             
             llr_mmse_i = self.demapper([x_hat_mmse_i, no_mmse_new_i])
-            llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (1, 2, 1))], axis=2)
+            llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (batch_size, 2, 1))], axis=2)
             
         bits = bits[:, self.num_bits_per_symbol:]
         
