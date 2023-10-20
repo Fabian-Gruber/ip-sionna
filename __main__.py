@@ -13,10 +13,10 @@ def __main__():
     ebno_db_min = -3.0 # Minimum value of Eb/N0 [dB] for simulations
     ebno_db_max = 5.0 # Maximum value of Eb/N0 [dB] for simulations
     batch_size = 1 # How many examples are processed by Sionna in parallel
-    n_coherences = 1
+    n_coherence = 1
     n_antennas = 32
     
-    uncoded_e2e_model = e2e(num_bits_per_symbol=num_bits_per_symbol, block_length=block_length, n_coherences=n_coherences, n_antennas=n_antennas)
+    uncoded_e2e_model = e2e(num_bits_per_symbol=num_bits_per_symbol, block_length=block_length, n_coherence=n_coherence, n_antennas=n_antennas)
     
     ber_plots = sn.utils.PlotBER("Uncoded BER")
     ber_plots.simulate(
@@ -27,8 +27,10 @@ def __main__():
         legend="Uncoded",
         soft_estimates=True,
         max_mc_iter=100, # run 100 Monte-Carlo simulations (each with batch_size samples)
-        show_fig=True
+        show_fig=True   
     )
+    
+    ber_plots()
 
 if __name__ == "__main__":
     __main__()

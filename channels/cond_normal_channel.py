@@ -19,17 +19,24 @@ def complex_noise(shape, no):
 class cond_normal_channel(tf.keras.Model):
     def __init__(self):
         super().__init__()
-        
-    def __call__(self, x, no, batch_size, n_coherences, n_antennas, h=None, C=None):
-        if(h is None or C is None):
-            h, C = channel_generation(batch_size, n_coherences, n_antennas)
-                
-        n = tf.zeros(shape=h.shape, dtype='complex64')
-                
-        n = tf.complex(tf.random.normal(h.shape, dtype=tf.float32), tf.random.normal(h.shape, dtype=tf.float32))
-        n = tf.divide(n, tf.cast(tf.sqrt(no / 2.0), dtype=tf.complex64))        
-                        
+
+    def __call__(self, x, no, batch_size, n_coherence, n_antennas, h=None, C=None):
+        if h is None or C is None:
+            h, C = channel_generation(batch_size, n_coherence, n_antennas)
+
+        noise_real = tf.random.normal(h.shape[1:], dtype=tf.float32)
+        noise_imag = tf.random.normal(h.shape[1:], dtype=tf.float32)
+
+        # Create complex noise
+        noise = tf.complex(noise_real, noise_imag)
+
+        # Broadcast the complex noise to the batch size
+        n = tf.broadcast_to(noise, shape=(batch_size,) + noise.shape)
+
+        n = n / tf.cast(tf.sqrt(no / 2.0), dtype=tf.complex64)
+
         y = h * x + n
         
-        return y, h, C, n
+        return y, h, C
+
     
