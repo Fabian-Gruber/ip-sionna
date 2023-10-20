@@ -24,6 +24,7 @@ class cond_normal_channel(tf.keras.Model):
         if h is None or C is None:
             h, C = channel_generation(batch_size, n_coherence, n_antennas)
 
+
         noise_real = tf.random.normal(h.shape[1:], dtype=tf.float32)
         noise_imag = tf.random.normal(h.shape[1:], dtype=tf.float32)
 
@@ -34,9 +35,9 @@ class cond_normal_channel(tf.keras.Model):
         n = tf.broadcast_to(noise, shape=(batch_size,) + noise.shape)
 
         n = n / tf.cast(tf.sqrt(no / 2.0), dtype=tf.complex64)
-
-        y = h * x + n
         
+        y = h * x + n
+                
         return y, h, C
 
     

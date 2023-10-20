@@ -5,8 +5,11 @@ class genie_mmse_estimator(tf.keras.Model):
         super().__init__()
         
     def __call__(self, y, no, C, pilot):
+                
         # noise_var = no^2 * I. Be careful of the data types!
         noise_var = tf.cast(tf.square(no) * tf.eye(C.shape[0]), dtype=tf.complex64)
+        
+        noise_var = tf.broadcast_to(noise_var, shape=[tf.shape(y)[0], noise_var.shape[0], noise_var.shape[1]])
         
         # scaled_C = |p|^2 * C. Be careful of the data types!
         scaled_C = tf.math.abs(pilot) ** 2 * C
@@ -19,9 +22,7 @@ class genie_mmse_estimator(tf.keras.Model):
         
         # matrix = scaled_C_2 * inverse with shape (1, matrix_size, matrix_size)
         matrix = tf.matmul(tf.cast(scaled_C_2, dtype=tf.complex64), inverse)
-        
-        matrix = tf.reshape(matrix, shape=[1, tf.shape(matrix)[0], tf.shape(matrix)[1]])
-        
+                
         y_transpose = tf.transpose(y, perm=[0, 2, 1])
                                 
         # h_hat_mmse = (scaled_C_2 * inverse) * y. Be careful of the data types!
