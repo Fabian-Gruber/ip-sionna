@@ -14,8 +14,10 @@ from equalizers import equalizer as eq
 
 class end2endModel(tf.keras.Model):
 
-    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas):
+    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas, genie_estimator):
         super().__init__()
+        
+        self.genie_estimator = genie_estimator
         
         self.n_coherence = n_coherence
         self.n_antennas = n_antennas
@@ -91,5 +93,8 @@ class end2endModel(tf.keras.Model):
         llr_ls = tf.reshape(llr_ls, bits.shape)
         llr_mmse = tf.reshape(llr_mmse, bits.shape)
         
-        return bits, llr_ls, llr_mmse
+        if self.genie_estimator:
+            return bits, llr_mmse
+        
+        return bits, llr_ls
         
