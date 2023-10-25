@@ -50,11 +50,11 @@ class end2endModel(tf.keras.Model):
         pilot = tf.ones((batch_size, 1, 1), dtype=tf.complex64)
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
-                
+                        
         h_hat_ls = self.ls_estimator(h, pilot)
                 
         h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
-                        
+                                
         #uplink phase
                 
         #x_data = all x except x[0][0] (x has shape (1, 512))
@@ -65,8 +65,8 @@ class end2endModel(tf.keras.Model):
         x_hat_mmse = []
         no_ls_new = []
         no_mmse_new = []
-        llr_ls = tf.zeros((batch_size, 2, 0), dtype=tf.float32)
-        llr_mmse = tf.zeros((batch_size, 2, 0), dtype=tf.float32)
+        llr_ls = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
+        llr_mmse = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
                 
         for i in range(tf.shape(x_data)[1]):
             #y = h * x + n for all x except first one
@@ -81,17 +81,28 @@ class end2endModel(tf.keras.Model):
             x_hat_mmse.append(x_hat_mmse_i)
             no_mmse_new.append(no_mmse_new_i)
             
+            #print('value of x_hat_mmse_i: ', x_hat_mmse_i)
+            #print('value of no_mmse_new_i: ', no_mmse_new_i)
+            
             llr_ls_i = self.demapper([x_hat_ls_i, no_ls_new_i])
-            llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (batch_size, 2, 1))], axis=2)
+            #llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (batch_size, 2, 1))], axis=2)
+            llr_ls = llr_ls.write(i, llr_ls_i)
             
             llr_mmse_i = self.demapper([x_hat_mmse_i, no_mmse_new_i])
-            llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (batch_size, 2, 1))], axis=2)
+            #print('llr_mmse_i.shape: ', llr_mmse_i.shape)
+            llr_mmse = llr_mmse.write(i, llr_mmse_i)
+            #llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (batch_size, 2, 1))], axis=2)
+            
+        llr_ls = llr_ls.stack()
+        llr_ls = tf.transpose(llr_ls, perm=[1, 2, 0])
+        llr_mmse = llr_mmse.stack()
+        llr_mmse = tf.transpose(llr_mmse, perm=[1, 2, 0])
             
         bits = bits[:, self.num_bits_per_symbol:]
         
         llr_ls = tf.reshape(llr_ls, bits.shape)
         llr_mmse = tf.reshape(llr_mmse, bits.shape)
-                
+                        
         
         if self.genie_estimator:
             return bits, llr_mmse

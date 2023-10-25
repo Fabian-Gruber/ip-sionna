@@ -11,10 +11,10 @@ import tensorflow as tf
 
 def __main__():
     num_bits_per_symbol = 2
-    block_length = 1024
+    block_length = 256
     ebno_db_min = -10.0 # Minimum value of Eb/N0 [dB] for simulations
     ebno_db_max = 10.0 # Maximum value of Eb/N0 [dB] for simulations
-    batch_size = 1024 # How many examples are processed by Sionna in parallel
+    batch_size = 256 # How many examples are processed by Sionna in parallel
     n_coherence = 1
     n_antennas = 32
     genie_estimator = False
@@ -33,24 +33,37 @@ def __main__():
     #    show_fig=True   
     #)
     
-    iterations = 10
+    iterations = 5
     
-    vertically_stacked_bits = tf.zeros((batch_size, 0), dtype=tf.float32)
-    vertically_stacked_llrs = tf.zeros((batch_size, 0), dtype=tf.float32)
-    
+    vertically_stacked_bits_list = []
+    vertically_stacked_llrs_list = []
+
     for j in range(iterations):
-        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=50.0)
-        vertically_stacked_bits = tf.concat([vertically_stacked_bits, vertically_stacked_bits_j], axis=1)
-        vertically_stacked_llrs = tf.concat([vertically_stacked_llrs, vertically_stacked_llrs_j], axis=1)
-        
-    print('vertically_stacked_bits.shape: ', vertically_stacked_bits.shape)
-    print('vertically_stacked_llrs.shape: ', vertically_stacked_llrs.shape)
+        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=15.0)
+        vertically_stacked_bits_list.append(vertically_stacked_bits_j)
+        vertically_stacked_llrs_list.append(vertically_stacked_llrs_j)
+
+    vertically_stacked_bits = tf.concat(vertically_stacked_bits_list, axis=1)
+    vertically_stacked_llrs = tf.concat(vertically_stacked_llrs_list, axis=1)
+
+    # Modify this part to use an appropriate threshold
+    threshold = 0.0  # Adjust the threshold based on your modulation scheme
+    bits_hat = tf.where(vertically_stacked_llrs > threshold, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))
+
+    # Calculate BER
+    bit_errors = tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits, bits_hat), dtype=tf.float32))
+    total_bits = iterations * batch_size * (block_length - num_bits_per_symbol)
+    ber = bit_errors / total_bits
     
-    bits_hat = tf.where(vertically_stacked_llrs > 0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))
-                
-    ber_10_db = tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits, bits_hat), dtype=tf.float32)) / (iterations * batch_size * (block_length - num_bits_per_symbol))
+    #print number of 1s in vertically_stacked_bits
+    print('number of 1s in vertically_stacked_bits: ', tf.reduce_sum(vertically_stacked_bits))
     
-    print('ber_10_db: ', ber_10_db)
+    #print number of 1s in vertically_stacked_llrs with threshold 0.0
+    print('number of 1s in vertically_stacked_llrs with threshold 0.0: ', tf.reduce_sum(tf.where(vertically_stacked_llrs > 0.0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))))
+    
+    print('shape of vertically_stacked_bits: ', vertically_stacked_bits.shape)
+    
+    print('bit_errors: ', ber)
     
 if __name__ == "__main__":
     __main__()
