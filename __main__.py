@@ -64,7 +64,7 @@ def __main__():
     #print number of 1s in vertically_stacked_llrs with threshold 0.0
     print('number of 1s in vertically_stacked_llrs with threshold 0.0: ', tf.reduce_sum(tf.where(vertically_stacked_llrs > 0.0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))))
         
-    print('bit_errors: ', ber)
+    print('bit error rate: ', ber)
     
 if __name__ == "__main__":
     __main__()
