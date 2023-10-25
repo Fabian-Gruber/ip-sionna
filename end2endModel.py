@@ -50,17 +50,16 @@ class end2endModel(tf.keras.Model):
         pilot = tf.ones((batch_size, 1, 1), dtype=tf.complex64)
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
-        
+                
         h_hat_ls = self.ls_estimator(h, pilot)
-        
+                
         h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
-        
+                        
         #uplink phase
-        
+                
         #x_data = all x except x[0][0] (x has shape (1, 512))
         x_data = x[:, 1:]
-        
-                        
+                                        
         y = []
         x_hat_ls = []
         x_hat_mmse = []
@@ -92,6 +91,7 @@ class end2endModel(tf.keras.Model):
         
         llr_ls = tf.reshape(llr_ls, bits.shape)
         llr_mmse = tf.reshape(llr_mmse, bits.shape)
+                
         
         if self.genie_estimator:
             return bits, llr_mmse

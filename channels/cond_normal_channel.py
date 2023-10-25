@@ -35,7 +35,7 @@ class cond_normal_channel(tf.keras.Model):
         n = tf.broadcast_to(noise, shape=(batch_size,) + noise.shape)
 
         n = n / tf.cast(tf.sqrt(no / 2.0), dtype=tf.complex64)
-        
+                
         y = h * x + n
                 
         return y, h, C
