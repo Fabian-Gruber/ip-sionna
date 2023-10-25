@@ -43,6 +43,8 @@ class end2endModel(tf.keras.Model):
         no = sn.utils.ebnodb2no(ebno_db,
                                 num_bits_per_symbol=self.num_bits_per_symbol,
                                 coderate=1.0)
+        
+        #print('value of no: ', no)
 
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
         x = self.mapper(bits)
@@ -80,9 +82,9 @@ class end2endModel(tf.keras.Model):
             x_hat_mmse_i, no_mmse_new_i = self.equalizer(h_hat_mmse, y_i, no)
             x_hat_mmse.append(x_hat_mmse_i)
             no_mmse_new.append(no_mmse_new_i)
-            
+                        
             #print('value of x_hat_mmse_i: ', x_hat_mmse_i)
-            #print('value of no_mmse_new_i: ', no_mmse_new_i)
+            #print('value of no_mmse_new_i: ', no_mmse_new_i[0])
             
             llr_ls_i = self.demapper([x_hat_ls_i, no_ls_new_i])
             #llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (batch_size, 2, 1))], axis=2)
@@ -92,6 +94,7 @@ class end2endModel(tf.keras.Model):
             #print('llr_mmse_i.shape: ', llr_mmse_i.shape)
             llr_mmse = llr_mmse.write(i, llr_mmse_i)
             #llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (batch_size, 2, 1))], axis=2)
+        
             
         llr_ls = llr_ls.stack()
         llr_ls = tf.transpose(llr_ls, perm=[1, 2, 0])
