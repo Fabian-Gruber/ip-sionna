@@ -39,7 +39,7 @@ def __main__():
     vertically_stacked_llrs_list = []
 
     for j in range(iterations):
-        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=15.0)
+        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=-5.0)
         vertically_stacked_bits_list.append(vertically_stacked_bits_j)
         vertically_stacked_llrs_list.append(vertically_stacked_llrs_j)
 
