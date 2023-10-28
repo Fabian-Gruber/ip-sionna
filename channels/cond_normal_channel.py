@@ -16,7 +16,7 @@ class cond_normal_channel(tf.keras.Model):
     def __call__(self, x, no, batch_size, n_coherence, n_antennas, h=None, C=None):
         if h is None or C is None:
             h, C = channel_generation(batch_size, n_coherence, n_antennas)
-            
+                        
         n = tf.TensorArray(tf.complex64, size=batch_size)
 
         for i in range(batch_size):
@@ -26,7 +26,9 @@ class cond_normal_channel(tf.keras.Model):
             noise_i = noise_i * tf.cast(tf.sqrt(no / 2.0), dtype=tf.complex64)
             n = n.write(i, noise_i)
         n = n.stack()
-                
+        
+        x = tf.reshape(x, [-1, 1, 1])
+                        
         y = h * x + n
         
         #print('first 10 elements of y: ', y[0,0,:10])

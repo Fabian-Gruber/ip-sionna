@@ -39,7 +39,7 @@ def __main__():
     vertically_stacked_llrs_list = []
 
     for j in range(iterations):
-        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=-100.0)
+        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=10.0)
         vertically_stacked_bits_list.append(vertically_stacked_bits_j)
         vertically_stacked_llrs_list.append(vertically_stacked_llrs_j)
 
@@ -58,13 +58,19 @@ def __main__():
     total_bits = iterations * batch_size * (block_length - num_bits_per_symbol)
     ber = bit_errors / total_bits
     
+    mse = tf.reduce_mean(tf.square(vertically_stacked_bits - bits_hat))
+    
     #print number of 1s in vertically_stacked_bits
     print('number of 1s in vertically_stacked_bits: ', tf.reduce_sum(vertically_stacked_bits))
     
     #print number of 1s in vertically_stacked_llrs with threshold 0.0
     print('number of 1s in vertically_stacked_llrs with threshold 0.0: ', tf.reduce_sum(tf.where(vertically_stacked_llrs > 0.0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))))
         
+    print('number of bit errors: ', bit_errors)
+    
     print('bit error rate: ', ber)
+    
+    print('mean squared error: ', mse)
     
 if __name__ == "__main__":
     __main__()
