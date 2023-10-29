@@ -54,13 +54,13 @@ class end2endModel(tf.keras.Model):
         pilot = tf.ones((batch_size, 1, 1), dtype=tf.complex64)
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
-                        
+              
         h_hat_ls = self.ls_estimator(y_p, pilot)
-                
+
         h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
-        
+                
         print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.abs(h_hat_ls - h)))
-        print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - h)))
+        print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64))))
                                 
         #uplink phase
                 
