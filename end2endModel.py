@@ -58,6 +58,8 @@ class end2endModel(tf.keras.Model):
         h_hat_ls = self.ls_estimator(y_p, pilot)
 
         h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
+        
+        
                 
         print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.abs(h_hat_ls - h)))
         print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64))))
