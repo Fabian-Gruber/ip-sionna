@@ -35,7 +35,8 @@ class end2endModel(tf.keras.Model):
         self.equalizer = eq.equalizer()
         
         self.demapper = sn.mapping.Demapper("app", constellation=self.constellation, num_bits_per_symbol=self.num_bits_per_symbol)
-        
+    
+    @tf.function
     def __call__(self, batch_size, ebno_db):
         
         #pilot phase
@@ -61,8 +62,8 @@ class end2endModel(tf.keras.Model):
         
         
                 
-        print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.abs(h_hat_ls - h)))
-        print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64))))
+        # print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.abs(h_hat_ls - h)))
+        # print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64))))
                                 
         #uplink phase
                 

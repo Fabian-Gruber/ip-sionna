@@ -39,7 +39,7 @@ def __main__():
     vertically_stacked_llrs_list = []
 
     for j in range(iterations):
-        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=10.0)
+        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=-10.0)
         vertically_stacked_bits_list.append(vertically_stacked_bits_j)
         vertically_stacked_llrs_list.append(vertically_stacked_llrs_j)
 
@@ -50,8 +50,8 @@ def __main__():
     threshold = 0.0  # Adjust the threshold based on your modulation scheme
     bits_hat = tf.where(vertically_stacked_llrs > threshold, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))
     
-    print('shape of bits_hat: ', bits_hat.shape)
-    print('shape of vertically_stacked_bits: ', vertically_stacked_bits.shape)
+    # print('shape of bits_hat: ', bits_hat.shape)
+    # print('shape of vertically_stacked_bits: ', vertically_stacked_bits.shape)
 
     # Calculate BER
     bit_errors = tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits, bits_hat), dtype=tf.float32))
@@ -61,12 +61,12 @@ def __main__():
     mse = tf.reduce_mean(tf.square(vertically_stacked_bits - bits_hat))
     
     #print number of 1s in vertically_stacked_bits
-    print('number of 1s in vertically_stacked_bits: ', tf.reduce_sum(vertically_stacked_bits))
+    # print('number of 1s in vertically_stacked_bits: ', tf.reduce_sum(vertically_stacked_bits))
     
-    #print number of 1s in vertically_stacked_llrs with threshold 0.0
-    print('number of 1s in vertically_stacked_llrs with threshold 0.0: ', tf.reduce_sum(tf.where(vertically_stacked_llrs > 0.0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))))
+    # #print number of 1s in vertically_stacked_llrs with threshold 0.0
+    # print('number of 1s in vertically_stacked_llrs with threshold 0.0: ', tf.reduce_sum(tf.where(vertically_stacked_llrs > 0.0, tf.ones_like(vertically_stacked_bits), tf.zeros_like(vertically_stacked_bits))))
         
-    print('number of bit errors: ', bit_errors)
+    # print('number of bit errors: ', bit_errors)
     
     print('bit error rate: ', ber)
     

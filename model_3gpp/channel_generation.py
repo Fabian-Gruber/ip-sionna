@@ -7,7 +7,7 @@ def channel_generation(batch_size, n_coherences, n_antennas):
     SIMO version.
     """
     path_sigma = 2.0
-    n_path = 1
+    n_path = 1024
     channel = SCMMulti(path_sigma=path_sigma, n_path=n_path)
 
     # generate channel samples with a certain batch size

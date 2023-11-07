@@ -2,8 +2,8 @@ FROM tensorflow/tensorflow:2.11.0-gpu-jupyter
 EXPOSE 8888
 COPY . /tmp/
 WORKDIR /tmp/
-RUN make install
 RUN apt-get update && apt-get install -y llvm
+RUN pip install --upgrade sionna
 RUN pip install --upgrade ipykernel
 RUN pip install --upgrade jupyterlab
 RUN rm -R /tf/* && cp /tmp/notebooks/* /tf
