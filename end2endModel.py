@@ -36,7 +36,6 @@ class end2endModel(tf.keras.Model):
         
         self.demapper = sn.mapping.Demapper("app", constellation=self.constellation, num_bits_per_symbol=self.num_bits_per_symbol)
     
-    @tf.function
     def __call__(self, batch_size, ebno_db):
         
         #pilot phase
@@ -52,18 +51,16 @@ class end2endModel(tf.keras.Model):
         
         # print('shape of x: ', x.shape)
                                 
-        pilot = tf.ones((batch_size, 1, 1), dtype=tf.complex64)
+        pilot = tf.ones([batch_size,1,1], dtype=tf.complex64)
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
               
         h_hat_ls = self.ls_estimator(y_p, pilot)
 
         h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
-        
-        
-                
-        # print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.abs(h_hat_ls - h)))
-        # print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64))))
+                        
+        print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_ls - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+        print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
                                 
         #uplink phase
                 
@@ -87,7 +84,7 @@ class end2endModel(tf.keras.Model):
             # print('y_i.shape: ', y_i.shape)
             y.append(y_i)
         
-            x_hat_ls_i, no_ls_new_i = self.equalizer(h_hat_ls, y_i, no)
+            x_hat_ls_i, no_ls_new_i = self.equalizer(h_hat_ls, y_i, no, x_data[:, i], 'ls')
             # print('x_hat_ls_i.shape: ', x_hat_ls_i.shape)
             # print('no_ls_new_i.shape: ', no_ls_new_i.shape)
             x_hat_ls.append(x_hat_ls_i)
@@ -95,7 +92,7 @@ class end2endModel(tf.keras.Model):
             
             # print('difference between x_hat_ls_i and x_data[:, i]: ', tf.reduce_sum(tf.abs(x_hat_ls_i - tf.reshape(x_data[:, i], [-1, 1]))))
 
-            x_hat_mmse_i, no_mmse_new_i = self.equalizer(h_hat_mmse, y_i, no)
+            x_hat_mmse_i, no_mmse_new_i = self.equalizer(h_hat_mmse, y_i, no, x_data[:, i], 'mmse')
             x_hat_mmse.append(x_hat_mmse_i)
             no_mmse_new.append(no_mmse_new_i)
                         

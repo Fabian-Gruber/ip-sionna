@@ -7,7 +7,7 @@ def channel_generation(batch_size, n_coherences, n_antennas):
     SIMO version.
     """
     path_sigma = 2.0
-    n_path = 1024
+    n_path = 1
     channel = SCMMulti(path_sigma=path_sigma, n_path=n_path)
 
     # generate channel samples with a certain batch size
@@ -20,7 +20,7 @@ def channel_generation(batch_size, n_coherences, n_antennas):
     
     for i in range(batch_size):
         # Calculate the covariance matrix for each sample
-        C[i, :, :] = toeplitz(t[i, :])
+        C[i, :, :] = np.transpose(toeplitz(t[i, :]))
     
     print('Generated ' + str(batch_size) + ' SIMO channel samples of size ' + str(n_antennas) + 'x1.')
     

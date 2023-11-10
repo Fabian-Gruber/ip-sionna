@@ -17,37 +17,45 @@ class genie_mmse_estimator(tf.keras.Model):
         # print('check if scaled_C is hermitian', tf.reduce_all(tf.equal(scaled_C, tf.math.conj(tf.transpose(scaled_C, perm=[0, 2, 1])))))
         
         eigenvalues, eigenvectors = tf.linalg.eigh(scaled_C)
+
+        # print('shape of eigenvalues: ', eigenvalues.shape)
                         
         # Compute the inverse of (Lambda * noise_var)^-1
         inverse_lambda_noise_var = tf.linalg.inv(tf.linalg.diag(eigenvalues) + noise_var)
 
         # Compute the inverse of the sum
-        # inverse = tf.matmul(tf.matmul(eigenvectors, inverse_lambda_noise_var), tf.transpose(eigenvectors, conjugate=True, perm=[0, 2, 1]))
+        inverse = tf.matmul(tf.matmul(eigenvectors, inverse_lambda_noise_var), tf.transpose(eigenvectors, conjugate=True, perm=[0, 2, 1]))
         
         # print('shape of einsum of inverse_lambda_noise_var: ', tf.einsum('ijk,ilk->ijl', inverse_lambda_noise_var, tf.transpose(eigenvectors, conjugate=True, perm=[0, 1, 2])).shape)
         
-        # inverse = tf.einsum('ijk,ikl->ijl', eigenvectors, tf.einsum('ijk,ilk->ijl', inverse_lambda_noise_var, tf.transpose(eigenvectors, conjugate=True, perm=[0, 1, 2])))
+        # inverse_2 = tf.einsum('ijk,ikl->ijl', eigenvectors, tf.einsum('ijk,ilk->ijl', inverse_lambda_noise_var, tf.transpose(eigenvectors, conjugate=True, perm=[0, 1, 2])))
 
-        inverse = tf.linalg.inv(scaled_C + noise_var)
+        # inverse = tf.linalg.inv(scaled_C + noise_var)
         
         # print('where are inverse and inverse_2 the same: ', tf.reduce_sum(tf.where(tf.abs(inverse - inverse_2) > 1e-2, tf.ones_like(inverse), tf.zeros_like(inverse))))
         
+        # print('inverse * (noise + scaled_C): ', tf.matmul(inverse, noise_var + scaled_C)[33, :10, :10])
+
         # print('eigenvalues: ', eigenvalues[0, :])
-        # print('maximum value of eigenvalues: ', tf.math.reduce_max(tf.math.real(eigenvalues), axis=1)[0])
-        # print('minimum value of eigenvalues: ', tf.math.reduce_min(tf.math.real(eigenvalues), axis=1)[0])          
+        # print('shape of maximum value of eigenvalues: ', tf.math.reduce_max(tf.math.reduce_max(tf.math.real(eigenvalues), axis=1)))
+        # print('maximum value of eigenvalues: ', tf.math.reduce_max(tf.math.reduce_max(tf.math.real(eigenvalues), axis=1)))
+        # print('minimum value of eigenvalues: ', tf.math.reduce_min(tf.math.reduce_min(tf.math.real(eigenvalues), axis=1)))
+        # print('condition number of scaled_C: ', tf.math.reduce_sum(tf.math.reduce_max(tf.math.real(eigenvalues), axis=1) / (tf.math.reduce_min(tf.math.real(eigenvalues), axis=1))) / 500.0)
                 
         # scaled_C_2 = conj(p) * C
-        scaled_C_2 = tf.math.conj(pilot) * tf.cast(C, dtype=tf.complex64)                        
+        scaled_C_2 = tf.math.conj(pilot) * tf.cast(C, dtype=tf.complex64)
 
         # matrix = scaled_C_2 * inverse
         matrix = tf.matmul(scaled_C_2, inverse)
 
+        # print('first 10 elements of inverse: ', inverse[0, 0, :])
 
-
-                                                                                                                            
+        # print('first 10 elements of scaled_C_2: ', scaled_C_2[0, :, 0])
+        # print('first 10 elements of matrix: ', matrix[:5, 10:20, 10:20])
+                                                                                                                         
         # h_hat_mmse = (scaled_C_2 * inverse) * y. Be careful of the data types!
         h_hat_mmse = tf.matmul(matrix, tf.transpose(tf.cast(y, dtype=tf.complex64), perm=[0, 2, 1]))   
-        h_hat_mmse_2 = tf.einsum('ijk,ilk->ijl', matrix, y) 
+        # h_hat_mmse_2 = tf.einsum('ijk,ilk->ijl', matrix, y) 
 
         # print('shape of y: ', y.shape)
         # print('shape of h_hat_mmse: ', h_hat_mmse.shape)
