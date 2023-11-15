@@ -17,9 +17,21 @@ def __main__():
     batch_size = 500 # How many examples are processed by Sionna in parallel
     n_coherence = 1
     n_antennas = 32
-    genie_estimator = True
+    training_batch_size = 10000
+    covariance_type = 'circulant'
+    n_gmm_components = 16
+    estimator = 'gmm'
     
-    uncoded_e2e_model = e2e(num_bits_per_symbol=num_bits_per_symbol, block_length=block_length, n_coherence=n_coherence, n_antennas=n_antennas, genie_estimator=genie_estimator)
+    uncoded_e2e_model = e2e(
+        num_bits_per_symbol=num_bits_per_symbol, 
+        block_length=block_length, 
+        n_coherence=n_coherence, 
+        n_antennas=n_antennas, 
+        training_batch_size=training_batch_size,
+        covariance_type=covariance_type,
+        n_gmm_components=n_gmm_components,
+        estimator=estimator
+    )
 
     #ber_plots = sn.utils.PlotBER("Uncoded BER")
     #ber_plots.simulate(
@@ -39,7 +51,7 @@ def __main__():
     vertically_stacked_llrs_list = []
 
     for j in range(iterations):
-        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=30.0)
+        vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model(batch_size=batch_size, ebno_db=10.0)
         vertically_stacked_bits_list.append(vertically_stacked_bits_j)
         vertically_stacked_llrs_list.append(vertically_stacked_llrs_j)
 

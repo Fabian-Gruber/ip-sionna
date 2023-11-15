@@ -24,13 +24,13 @@ class genie_mmse_estimator(tf.keras.Model):
         inverse_lambda_noise_var = tf.linalg.inv(tf.linalg.diag(eigenvalues) + noise_var)
 
         # Compute the inverse of the sum
-        inverse = tf.matmul(tf.matmul(eigenvectors, inverse_lambda_noise_var), tf.transpose(eigenvectors, conjugate=True, perm=[0, 2, 1]))
+        # inverse = tf.matmul(tf.matmul(eigenvectors, inverse_lambda_noise_var), tf.transpose(eigenvectors, conjugate=True, perm=[0, 2, 1]))
         
         # print('shape of einsum of inverse_lambda_noise_var: ', tf.einsum('ijk,ilk->ijl', inverse_lambda_noise_var, tf.transpose(eigenvectors, conjugate=True, perm=[0, 1, 2])).shape)
         
         # inverse_2 = tf.einsum('ijk,ikl->ijl', eigenvectors, tf.einsum('ijk,ilk->ijl', inverse_lambda_noise_var, tf.transpose(eigenvectors, conjugate=True, perm=[0, 1, 2])))
 
-        # inverse = tf.linalg.inv(scaled_C + noise_var)
+        inverse = tf.linalg.inv(scaled_C + noise_var)
         
         # print('where are inverse and inverse_2 the same: ', tf.reduce_sum(tf.where(tf.abs(inverse - inverse_2) > 1e-2, tf.ones_like(inverse), tf.zeros_like(inverse))))
         

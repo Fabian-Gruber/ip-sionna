@@ -4,7 +4,7 @@ class equalizer(tf.keras.Model):
     def __init__(self):
         super().__init__()
         
-    def __call__(self, h_hat, y, no, x, estimator):
+    def __call__(self, h_hat, y, no):
                
         norm_h_hat_squared = tf.reduce_sum(tf.square(tf.abs(h_hat)), axis=-1)
                         
