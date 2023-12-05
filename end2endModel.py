@@ -19,10 +19,11 @@ from equalizers import equalizer as eq
 
 class end2endModel(tf.keras.Model):
 
-    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas, training_batch_size, covariance_type, n_gmm_components, estimator):
+    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas, training_batch_size, covariance_type, n_gmm_components, estimator, output_quantity):
         super().__init__()
         
         self.estimator = estimator
+        self.output_quantity = output_quantity
         
         self.n_coherence = n_coherence
         self.n_antennas = n_antennas
@@ -39,7 +40,8 @@ class end2endModel(tf.keras.Model):
         self.gmm_estimator = gmm.gmm_estimator(
             n_components = n_gmm_components,
             random_state = 2,
-            max_iter = 100,
+            max_iter = 500,
+            verbose = 2,
             n_init = 1,
             covariance_type = covariance_type,
         )
@@ -73,6 +75,8 @@ class end2endModel(tf.keras.Model):
         #print('value of no: ', no)
 
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
+        bits = bits[:, self.num_bits_per_symbol:]
+
         x = self.mapper(bits)
                                         
         pilot = tf.ones([batch_size,1,1], dtype=tf.complex64)
@@ -96,14 +100,20 @@ class end2endModel(tf.keras.Model):
 
         h_hat_gmm = tf.reshape(h_hat_gmm, (batch_size, 1, self.n_antennas))
                         
-        print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_ls - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
-        print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
-        print('difference between h_hat_gmm and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_gmm - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+        # print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_ls - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+        # print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+        # print('difference between h_hat_gmm and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_gmm - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
                                 
+        if self.output_quantity == 'nmse' and self.estimator == 'ls':
+            return h, h_hat_ls
+        elif self.output_quantity == 'nmse' and self.estimator == 'mmse':
+            return h, h_hat_mmse
+        elif self.output_quantity == 'nmse' and self.estimator == 'gmm':
+            return h, h_hat_gmm
+
         #uplink phase
                 
         #x_data = all x except x[0][0] (x has shape (batch_size, block_length / num_bits_per_symbol))
-        x_data = x[:, 1:]
         
         # print('shape of x_data: ', x_data.shape)
                                         
@@ -118,10 +128,10 @@ class end2endModel(tf.keras.Model):
         llr_mmse = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
         llr_gmm = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
                 
-        for i in range(tf.shape(x_data)[1]):
+        for i in range(tf.shape(x)[1]):
             #y = h * x + n for all x except first one
             # print('x_data[0][i].shape: ', x_data[0][i].shape)
-            y_i = self.channel(x_data[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
+            y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
             # print('y_i.shape: ', y_i.shape)
             y.append(y_i)
         
@@ -155,8 +165,6 @@ class end2endModel(tf.keras.Model):
             llr_gmm_i = self.demapper([x_hat_gmm_i, no_gmm_new_i])
             llr_gmm = llr_gmm.write(i, llr_gmm_i)
         
-         
-        bits = bits[:, self.num_bits_per_symbol:]
         
         llr_ls = llr_ls.stack()
         #print('llr_ls first two elements: ', llr_ls[0][0][0], llr_ls[0][0][1])
@@ -179,24 +187,6 @@ class end2endModel(tf.keras.Model):
         llr_ls = tf.reshape(tf.stack(llr_ls, axis=2), bits.shape)
         llr_mmse = tf.reshape(tf.stack(llr_mmse, axis=2), bits.shape)
         llr_gmm = tf.reshape(tf.stack(llr_gmm, axis=2), bits.shape)
-        
-        # bits_hat = tf.where(llr_ls > 0.0, tf.ones_like(bits), tf.zeros_like(bits))
-        
-        # print("bits_hat before reshaping:\n", bits_hat[:3, :6])
-        # #print("llr_mmse before reshaping:\n", llr_mmse[:3, :3, :])
-        # print("bits:\n", bits[:3, :6])  # 6 columns to account for interleaving
-        #print('shape of llr_ls after reshape: ', llr_ls.shape)
-        #print('llr_ls first two elements after reshape: ', llr_ls[0][0], llr_ls[0][1])
-        # print('shape of llr_mmse after reshape: ', llr_mmse.shape)
-        
-        # bits_hat = tf.where(llr_ls > 0.0, tf.ones_like(bits), tf.zeros_like(bits))
-        
-        # print('first 30 bits in bits_hat: ', bits_hat[1][:30])
-        # print('first 30 bits in bits: ', bits[1][:30])
-        
-        # mismatched_indices = tf.where(tf.not_equal(bits, bits_hat))
-        # print(mismatched_indices[100: 150])
-
                         
         
         if self.estimator == 'mmse':
@@ -205,4 +195,3 @@ class end2endModel(tf.keras.Model):
             return bits, llr_ls
         else:
             return bits, llr_gmm
-                
