@@ -5,12 +5,14 @@ except AttributeError:
 import tensorflow as tf
 import numpy as np
 import time
+import pickle
+import os
 
 from channels import cond_normal_channel as cnc
 
 from estimators import ls_estimator as lse
 from estimators import genie_mmse_estimator as gme
-from estimators import gmm_estimator as gmm
+from gmm_model.gmm_cplx import Gmm as gmm_cplx
 
 from training_samples_gmm import training_samples as ts
 
@@ -19,7 +21,7 @@ from equalizers import equalizer as eq
 
 class end2endModel(tf.keras.Model):
 
-    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas, training_batch_size, covariance_type, n_gmm_components, estimator, output_quantity):
+    def __init__(self, num_bits_per_symbol, block_length, n_coherence, n_antennas, estimator, output_quantity, training_batch_size=None, covariance_type=None, n_gmm_components=None, gmm_max_iterations=500):
         super().__init__()
         
         self.estimator = estimator
@@ -37,27 +39,43 @@ class end2endModel(tf.keras.Model):
         
         self.ls_estimator = lse.ls_estimator()
         self.mmse_estimator = gme.genie_mmse_estimator()
-        self.gmm_estimator = gmm.gmm_estimator(
-            n_components = n_gmm_components,
-            random_state = 2,
-            max_iter = 500,
-            verbose = 2,
-            n_init = 1,
-            covariance_type = covariance_type,
-        )
 
-        self.training_gmm = ts.training_samples()
+        if self.estimator == 'gmm':
+            model_dir = '/training_samples_gmm/training_models'
+            os.makedirs(model_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
-        tic = time.time()
+            # Define the full path for the model file
+            model_filename = os.path.join(model_dir, f'gmm_model_{n_gmm_components}x{training_batch_size}x{covariance_type}.pkl')
 
-        h_training = self.training_gmm(training_batch_size, n_coherence, n_antennas)
+            if os.path.exists(model_filename):
+                print(f"Loading GMM model from {model_filename}")
+                with open(model_filename, 'rb') as file:
+                    self.gmm_estimator = pickle.load(file)
+            else:
+                self.gmm_estimator = gmm_cplx(
+                    n_components = n_gmm_components,
+                    random_state = 2,
+                    max_iter = gmm_max_iterations,
+                    verbose = 2,
+                    n_init = 1,
+                    covariance_type = covariance_type,
+                )
 
-        self.gmm_estimator.fit(h_training)
+                self.training_gmm = ts.training_samples()
 
-        toc = time.time()
+                tic = time.time()
 
-        print(f"training done. ({toc - tic:.3f} s)")
-        
+                h_training = self.training_gmm(training_batch_size, n_coherence, n_antennas)
+
+                self.gmm_estimator.fit(h_training)
+
+                toc = time.time()
+
+                print(f"training done. ({toc - tic:.3f} s)")
+
+                with open(model_filename, 'wb') as file:
+                    pickle.dump(self.gmm_estimator, file)
+
         
         self.equalizer = eq.equalizer()
         
@@ -72,7 +90,7 @@ class end2endModel(tf.keras.Model):
                                 coderate=1.0)
         
         
-        #print('value of no: ', no)
+        # #print('value of no: ', no)
 
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
         bits = bits[:, self.num_bits_per_symbol:]
@@ -83,115 +101,111 @@ class end2endModel(tf.keras.Model):
                         
         y_p, h, C = self.channel(pilot, no, batch_size, self.n_coherence, self.n_antennas)
 
-        h_hat_ls = self.ls_estimator(y_p, pilot)
+        if self.estimator == 'ls':
 
-        h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
+            h_hat_ls = self.ls_estimator(y_p, pilot)
+            # print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_ls - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
 
-        noise_covariance = tf.eye(C.shape[-1]) * no
+            if self.output_quantity == 'nmse':
+                return h, h_hat_ls
 
-        #convert y_p from data type tf.complex64 to np.complex64
-        y_p_np = y_p.numpy().astype(np.complex64)
+            #uplink phase
+            else:
+                y = []
+                x_hat_ls = []
+                no_ls_new = []
+                llr_ls = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
 
-        y_p_np = np.squeeze(y_p_np, axis=1)
+                for i in range(tf.shape(x)[1]):
+                    #y = h * x + n for all x except first one
+                    y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
+                    y.append(y_i)
 
-        h_hat_gmm = self.gmm_estimator.estimate(y_p_np, noise_covariance, self.n_antennas, n_components_or_probability=1.0)
+                    x_hat_ls_i, no_ls_new_i = self.equalizer(h_hat_ls, y_i, no)
+                    x_hat_ls.append(x_hat_ls_i)
+                    no_ls_new.append(no_ls_new_i)
 
-        h_hat_gmm = tf.cast(h_hat_gmm, dtype=tf.complex64)
-
-        h_hat_gmm = tf.reshape(h_hat_gmm, (batch_size, 1, self.n_antennas))
-                        
-        # print('difference between h_hat_ls and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_ls - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
-        # print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
-        # print('difference between h_hat_gmm and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_gmm - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
-                                
-        if self.output_quantity == 'nmse' and self.estimator == 'ls':
-            return h, h_hat_ls
-        elif self.output_quantity == 'nmse' and self.estimator == 'mmse':
-            return h, h_hat_mmse
-        elif self.output_quantity == 'nmse' and self.estimator == 'gmm':
-            return h, h_hat_gmm
-
-        #uplink phase
+                    llr_ls_i = self.demapper([x_hat_ls_i, no_ls_new_i])
+                    llr_ls = llr_ls.write(i, llr_ls_i)
                 
-        #x_data = all x except x[0][0] (x has shape (batch_size, block_length / num_bits_per_symbol))
-        
-        # print('shape of x_data: ', x_data.shape)
-                                        
-        y = []
-        x_hat_ls = []
-        x_hat_mmse = []
-        x_hat_gmm = []
-        no_ls_new = []
-        no_mmse_new = []
-        no_gmm_new = []
-        llr_ls = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
-        llr_mmse = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
-        llr_gmm = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
+                llr_ls = llr_ls.stack()
+                llr_ls = tf.transpose(llr_ls, perm=[1, 0, 2])
+                llr_ls = tf.split(llr_ls, num_or_size_splits=2, axis=2)
+                llr_ls = tf.reshape(tf.stack(llr_ls, axis=2), bits.shape)
+                return bits, llr_ls
+            
+
+        elif self.estimator == 'mmse':
+
+            h_hat_mmse = self.mmse_estimator(y_p, no, C, pilot)
+            # print('difference between h_hat_mmse and h: ', tf.reduce_sum(tf.square(tf.abs(h_hat_mmse - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+
+            if self.output_quantity == 'nmse':
+                return h, h_hat_mmse
+            
+            #uplink phase
+            else:
+                y = []
+                x_hat_mmse = []
+                no_mmse_new = []
+                llr_mmse = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
+
+                for i in range(tf.shape(x)[1]):
+                    #y = h * x + n for all x except first one
+                    y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
+                    y.append(y_i)
+
+                    x_hat_mmse_i, no_mmse_new_i = self.equalizer(h_hat_mmse, y_i, no)
+                    x_hat_mmse.append(x_hat_mmse_i)
+                    no_mmse_new.append(no_mmse_new_i)
+
+                    llr_mmse_i = self.demapper([x_hat_mmse_i, no_mmse_new_i])
+                    llr_mmse = llr_mmse.write(i, llr_mmse_i)
                 
-        for i in range(tf.shape(x)[1]):
-            #y = h * x + n for all x except first one
-            # print('x_data[0][i].shape: ', x_data[0][i].shape)
-            y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
-            # print('y_i.shape: ', y_i.shape)
-            y.append(y_i)
-        
-            x_hat_ls_i, no_ls_new_i = self.equalizer(h_hat_ls, y_i, no)
-            # print('x_hat_ls_i.shape: ', x_hat_ls_i.shape)
-            # print('no_ls_new_i.shape: ', no_ls_new_i.shape)
-            x_hat_ls.append(x_hat_ls_i)
-            no_ls_new.append(no_ls_new_i)
-            
-            # print('difference between x_hat_ls_i and x_data[:, i]: ', tf.reduce_sum(tf.abs(x_hat_ls_i - tf.reshape(x_data[:, i], [-1, 1]))))
+                llr_mmse = llr_mmse.stack()
+                llr_mmse = tf.transpose(llr_mmse, perm=[1, 0, 2])
+                llr_mmse = tf.split(llr_mmse, num_or_size_splits=2, axis=2)
+                llr_mmse = tf.reshape(tf.stack(llr_mmse, axis=2), bits.shape)
+                return bits, llr_mmse
 
-            x_hat_mmse_i, no_mmse_new_i = self.equalizer(h_hat_mmse, y_i, no)
-            x_hat_mmse.append(x_hat_mmse_i)
-            no_mmse_new.append(no_mmse_new_i)
-                        
-            # print('difference between x_hat_mmse_i and x_data[:, i]: ', tf.reduce_sum(tf.abs(x_hat_mmse_i - tf.reshape(x_data[:, i], [-1, 1]))))
-                        
-            x_hat_gmm_i, no_gmm_new_i = self.equalizer(h_hat_gmm, y_i, no,)
-            x_hat_gmm.append(x_hat_gmm_i)
-            no_gmm_new.append(no_gmm_new_i)
-            
-            llr_ls_i = self.demapper([x_hat_ls_i, no_ls_new_i])
-            #llr_ls = tf.concat([llr_ls, tf.reshape(llr_ls_i, (batch_size, 2, 1))], axis=2)
-            llr_ls = llr_ls.write(i, llr_ls_i)
-            
-            llr_mmse_i = self.demapper([x_hat_mmse_i, no_mmse_new_i])
-            # print('llr_mmse_i.shape: ', llr_mmse_i.shape)
-            llr_mmse = llr_mmse.write(i, llr_mmse_i)
-            #llr_mmse = tf.concat([llr_mmse, tf.reshape(llr_mmse_i, (batch_size, 2, 1))], axis=2)
+        elif self.estimator == 'gmm':
 
-            llr_gmm_i = self.demapper([x_hat_gmm_i, no_gmm_new_i])
-            llr_gmm = llr_gmm.write(i, llr_gmm_i)
-        
-        
-        llr_ls = llr_ls.stack()
-        #print('llr_ls first two elements: ', llr_ls[0][0][0], llr_ls[0][0][1])
-        # print('shape of bits: ', bits.shape)
-        llr_ls = tf.transpose(llr_ls, perm=[1, 0, 2])
-        #print('llrs_ls.shape after transpose: ', llr_ls.shape)
-        llr_mmse = llr_mmse.stack()
-        # print('llr_mmse.shape: ', llr_mmse.shape)
-        llr_mmse = tf.transpose(llr_mmse, perm=[1, 0, 2])
-        #print('llrs_mmse.shape after transpose: ', llr_mmse.shape)
-        llr_gmm = llr_gmm.stack()
-        llr_gmm = tf.transpose(llr_gmm, perm=[1, 0, 2])
-        
-        
-        llr_ls = tf.split(llr_ls, num_or_size_splits=2, axis=2)
-        llr_mmse = tf.split(llr_mmse, num_or_size_splits=2, axis=2)
-        llr_gmm = tf.split(llr_gmm, num_or_size_splits=2, axis=2)
-            
-        
-        llr_ls = tf.reshape(tf.stack(llr_ls, axis=2), bits.shape)
-        llr_mmse = tf.reshape(tf.stack(llr_mmse, axis=2), bits.shape)
-        llr_gmm = tf.reshape(tf.stack(llr_gmm, axis=2), bits.shape)
-                        
-        
-        if self.estimator == 'mmse':
-            return bits, llr_mmse
-        elif self.estimator == 'ls':
-            return bits, llr_ls
-        else:
-            return bits, llr_gmm
+            #convert y_p from data type tf.complex64 to np.complex64
+            y_p_np = y_p.numpy().astype(np.complex64)
+
+            y_p_np = np.squeeze(y_p_np, axis=1)
+
+            h_hat_gmm = self.gmm_estimator.estimate_from_y(y_p_np, ebno_db, self.n_antennas, n_summands_or_proba='all')
+
+            h_hat_gmm = tf.cast(h_hat_gmm, dtype=tf.complex64)
+
+            h_hat_gmm = tf.reshape(h_hat_gmm, (batch_size, 1, self.n_antennas))
+            # print(f'difference between h_hat_gmm and h at {ebno_db}DB: ', tf.reduce_sum(tf.square(tf.abs(h_hat_gmm - tf.cast(h, dtype=tf.complex64)))) / tf.reduce_sum(tf.square(tf.abs(h))))
+
+            if self.output_quantity == 'nmse':
+                return h, h_hat_gmm
+
+            #uplink phase
+            else: 
+                y = []
+                x_hat_gmm = []
+                no_gmm_new = []
+                llr_gmm = tf.TensorArray(dtype=tf.float32, size=tf.cast(self.block_length / self.num_bits_per_symbol - 1, dtype=tf.int32))
+
+                for i in range(tf.shape(x)[1]):
+                    #y = h * x + n for all x except first one
+                    y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
+                    y.append(y_i)
+
+                    x_hat_gmm_i, no_gmm_new_i = self.equalizer(h_hat_gmm, y_i, no)
+                    x_hat_gmm.append(x_hat_gmm_i)
+                    no_gmm_new.append(no_gmm_new_i)
+
+                    llr_gmm_i = self.demapper([x_hat_gmm_i, no_gmm_new_i])
+                    llr_gmm = llr_gmm.write(i, llr_gmm_i)
+                
+                llr_gmm = llr_gmm.stack()
+                llr_gmm = tf.transpose(llr_gmm, perm=[1, 0, 2])
+                llr_gmm = tf.split(llr_gmm, num_or_size_splits=2, axis=2)
+                llr_gmm = tf.reshape(tf.stack(llr_gmm, axis=2), bits.shape)
+                return bits, llr_gmm

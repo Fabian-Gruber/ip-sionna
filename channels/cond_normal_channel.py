@@ -1,8 +1,3 @@
-try:
-    import sionna as sn
-except AttributeError:
-    import sionna as sn
-    
 import tensorflow as tf
 import numpy as np
 

@@ -4,7 +4,7 @@ import gmm_model.gmm_cplx as gmm_cplx
 from scipy import linalg as scilinalg
 
 
-class gmm_estimator(gmm_cplx.GaussianMixtureCplx):
+class gmm_estimator(gmm_cplx.Gmm):
     def estimate(
         self,
         y: npt.NDArray,

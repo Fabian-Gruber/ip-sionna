@@ -1,15 +1,7 @@
-# Original code from scikit-learn:
-# Author: Wei Xue <xuewei4d@gmail.com>
-# Modified by Thierry Guillemot <thierry.guillemot.work@gmail.com>
-# License: BSD 3 clause
-
-# Extension to the complex-valued case with (block-)Toeplitz and (block-)circulant covariances:
-# Author: Benedikt Fesl <benedikt.fesl@tum.de>
-# License: BSD 3 clause
-
 import numpy as np
 import scipy.stats
-from .utils import *
+
+from model_3gpp import utils as ut
 from scipy import linalg as scilinalg
 from sklearn.mixture import GaussianMixture
 from scipy.special import logsumexp
@@ -88,8 +80,55 @@ def _compute_log_det_cholesky(matrix_chol, covariance_type, n_features):
     return log_det_chol
 
 
+def create_mimo_gmm(channels_train_vec, gmm_rx, gmm_tx, n_rx, n_tx, n_components_rx, n_components_tx):
+    num_covs = n_components_rx * n_components_tx
 
-class GaussianMixtureCplx:
+    covs_kron_cplx = np.zeros([num_covs, n_rx * n_tx, n_rx * n_tx], dtype=complex)
+    means_kron_cplx = np.zeros([num_covs, n_rx * n_tx], dtype=complex)
+    covs_rx = gmm_rx.covs_cplx.copy()
+    covs_tx = gmm_tx.covs_cplx.copy()
+    means_rx = gmm_rx.means_cplx.copy()
+    means_tx = gmm_tx.means_cplx.copy()
+    it = 0
+    for n_r in range(n_components_rx):
+        for n_t in range(n_components_tx):
+            #covs_kron_cplx[it, :, :] = ut.kron_real(covs_tx[n_t, :, :], covs_rx[n_r, :, :])
+            covs_kron_cplx[it, :, :] = np.kron(covs_tx[n_t, :, :], covs_rx[n_r, :, :])
+            means_kron_cplx[it, :] = np.kron(means_tx[n_t, :], means_rx[n_r, :])
+            it += 1
+    chols = compute_precision_cholesky(covs_kron_cplx, 'full')
+
+    gmm_kron_cplx = Gmm(
+        n_components=n_components_rx * n_components_tx,
+        random_state=2,
+        max_iter=100,
+        n_init=1,
+        covariance_type='full',
+    )
+
+    gmm_kron_cplx.params['zero_mean'] = False
+    # initialize parameters such that weights are not None
+    gmm_kron_cplx._initialize_parameters(channels_train_vec, random_state=None)
+
+    gmm_kron_cplx.gm.precisions_cholesky_ = chols.copy()
+    gmm_kron_cplx.gm.covariances_ = covs_kron_cplx.copy()
+    gmm_kron_cplx.gm.n_features_in_ = n_rx * n_tx
+    gmm_kron_cplx.gm.means_ = means_kron_cplx.copy()
+    gmm_kron_cplx.means_cplx = gmm_kron_cplx.gm.means_.copy()
+    gmm_kron_cplx.covs_cplx = covs_kron_cplx.copy()
+
+    # compute weights by performing single e-step
+    n_samples = channels_train_vec.shape[0]
+    _, log_resp = gmm_kron_cplx._e_step(channels_train_vec)
+    resp = np.exp(log_resp)
+    weights = resp.sum(axis=0) + 10 * np.finfo(resp.dtype).eps
+    weights /= n_samples
+    gmm_kron_cplx.gm.weights_ = weights
+
+    return gmm_kron_cplx
+
+
+class Gmm():
     def __init__(self, *gmm_args, **gmm_kwargs):
         self.gm = GaussianMixture(*gmm_args, **gmm_kwargs)
         self.means_cplx = None
@@ -136,30 +175,17 @@ class GaussianMixtureCplx:
             self.params['zero_mean'] = True
         else:
             self.params['zero_mean'] = False
-        self.params['cov_type'] = self.gm.covariance_type
-        self.params['dft_trafo'] = False # indicate whether parameters are given in Fourier domain
 
-        if self.gm.covariance_type == 'full' or self.gm.covariance_type == 'diag' or self.gm.covariance_type \
-                == 'spherical' :
-            self.fit_cplx(h)
-            self.means_cplx = self.gm.means_.copy()
-            self.covs_cplx = self.gm.covariances_.copy()
-            self.chol = self.gm.precisions_cholesky_.copy()
-        elif self.gm.covariance_type == 'circulant':
+        if self.gm.covariance_type == 'diag':
             dft_matrix = np.fft.fft(np.eye(h.shape[-1], dtype=complex)) / np.sqrt(h.shape[-1])
-            self.gm.covariance_type = 'diag'
             self.fit_cplx(np.fft.fft(h, axis=1) / np.sqrt(h.shape[-1]))
             self.means_cplx = self.gm.means_ @ dft_matrix.conj()
-            self.gm._means = self.means_cplx.copy()
             self.covs_cplx = np.zeros([self.means_cplx.shape[0], self.means_cplx.shape[-1],
                                        self.means_cplx.shape[-1]], dtype=complex)
             for i in range(self.means_cplx.shape[0]):
                 self.covs_cplx[i] = dft_matrix.conj().T @ np.diag(self.gm.covariances_[i]) @ dft_matrix
-            self.gm.covariances_ = self.covs_cplx.copy()
             self.chol = compute_precision_cholesky(self.covs_cplx, 'full')
-            self.gm.precisions_cholesky_ = self.chol.copy()
-            self.gm.covariance_type = 'full'
-        elif self.gm.covariance_type == 'block-circulant':
+        elif self.gm.covariance_type == 'block-diag':
             self.gm.covariance_type = 'diag'
             n_1, n_2 = blocks
             F1 = np.fft.fft(np.eye(n_1)) / np.sqrt(n_1)
@@ -168,17 +194,19 @@ class GaussianMixtureCplx:
             self.F2 = dft_matrix
             self.fit_cplx(np.squeeze(dft_matrix @ np.expand_dims(h, 2)))
             self.means_cplx = self.gm.means_ @ dft_matrix.conj()
-            self.gm._means = self.means_cplx.copy()
             self.covs_cplx = np.zeros([self.means_cplx.shape[0], self.means_cplx.shape[-1],
                                        self.means_cplx.shape[-1]], dtype=complex)
             for i in range(self.means_cplx.shape[0]):
                 self.covs_cplx[i] = dft_matrix.conj().T @ np.diag(self.gm.covariances_[i]) @ dft_matrix
-            self.gm.covariances_ = self.covs_cplx.copy()
             self.chol = compute_precision_cholesky(self.covs_cplx, 'full')
-            self.gm.precisions_cholesky_ = self.chol.copy()
             self.gm.covariance_type = 'full'
             self.gm.means_ = self.means_cplx
             self.gm.precisions_cholesky_ = self.chol
+        elif self.gm.covariance_type == 'full':
+            self.fit_cplx(h)
+            self.means_cplx = self.gm.means_.copy()
+            self.covs_cplx = self.gm.covariances_.copy()
+            self.chol = self.gm.precisions_cholesky_.copy()
         elif self.gm.covariance_type == 'toeplitz':
             self.params['inv-em'] = True
             self.gm.covariance_type = 'full'
@@ -199,51 +227,168 @@ class GaussianMixtureCplx:
             self.means_cplx = self.gm.means_.copy()
             self.covs_cplx = self.gm.covariances_.copy()
             self.chol = self.gm.precisions_cholesky_.copy()
+        elif self.gm.covariance_type == 'circulant':
+            self.params['inv-em'] = True
+            self.gm.covariance_type = 'full'
+            n_dim = h.shape[1]
+            self.F2 = np.fft.fft(np.eye(n_dim)) / np.sqrt(n_dim)
+            self.fit_cplx(h)
+            self.means_cplx = self.gm.means_.copy()
+            self.covs_cplx = self.gm.covariances_.copy()
+            self.chol = self.gm.precisions_cholesky_.copy()
+        elif self.gm.covariance_type == 'block-circulant':
+            self.params['inv-em'] = True
+            self.gm.covariance_type = 'full'
+            n_1, n_2 = blocks
+            F1 = np.fft.fft(np.eye(n_1)) / np.sqrt(n_1)
+            F2 = np.fft.fft(np.eye(n_2)) / np.sqrt(n_2)
+            self.F2 = np.kron(F1, F2)
+            self.fit_cplx(h)
+            self.means_cplx = self.gm.means_.copy()
+            self.covs_cplx = self.gm.covariances_.copy()
+            self.chol = self.gm.precisions_cholesky_.copy()
         else:
             raise NotImplementedError(f'Fitting for covariance_type = {self.gm.covariance_type} is not implemented.')
 
-    def sample(self, n_samples=1):
-        """Generate random samples from the fitted Gaussian distribution.
-        Parameters
-        ----------
-        n_samples : int, default=1
-            Number of samples to generate.
-        Returns
-        -------
-        X : array, shape (n_samples, n_features)
-            Randomly generated sample.
-        y : array, shape (nsamples,)
-            Component labels.
+    def estimate_from_y(self, y, snr_dB, n_antennas, A=None, n_summands_or_proba=1):
+        """
+        Use the noise covariance matrix and the matrix A to update the
+        covariance matrices of the Gaussian mixture model. This GMM is then
+        used for channel estimation from y.
+
+        Args:
+            y: A 2D complex numpy array.
+            snr_dB: The SNR in dB.
+            n_antennas: The dimension of the channels.
+            A: A complex observation matrix.
+            n_summands_or_proba:
+                If equal to 'all', compute the sum of all LMMSE estimates.
+                If equal to an integer, compute the sum of the top (highest
+                    component probabilities) n_summands_or_proba LMMSE
+                    estimates.
+                If equal to a float, compute the sum of as many LMMSE estimates
+                    as are necessary to reach at least a cumulative component
+                    probability of n_summands_or_proba.
         """
 
-        if n_samples < 1:
-            raise ValueError(
-                "Invalid value for 'n_samples': %d . The sampling requires at "
-                "least one sample." % (self.gm.n_components)
-            )
+        if A is None:
+            A = np.eye(n_antennas, dtype=y.dtype)
+        y_for_prediction, covs_Cy_inv = self._prepare_for_prediction(y, A, snr_dB)
 
-        _, n_features = self.means_cplx.shape
-        rng = check_random_state(self.gm.random_state)
-        n_samples_comp = rng.multinomial(n_samples, self.gm.weights_)
+        h_est = np.zeros([y.shape[0], A.shape[-1]], dtype=complex)
+        if isinstance(n_summands_or_proba, int):
+            # n_summands_or_proba represents a number of summands
 
-        X = np.vstack(
-            [
-                #rng.multivariate_normal(mean, covariance, int(sample))
-                multivariate_normal_cplx(mean, covariances, int(sample), self.gm.covariance_type)
-                for (mean, covariances, sample) in zip(
-                    self.means_cplx, self.covs_cplx, n_samples_comp
-                )
-            ]
-        )
+            if n_summands_or_proba == 1:
+                # use predicted label to choose the channel covariance matrix
+                labels = self._predict_cplx(y_for_prediction)
+                for yi in range(y.shape[0]):
+                    mean_h = self.means_cplx[labels[yi], :]
+                    h_est[yi, :] = self._lmmse_formula(
+                        y[yi, :], mean_h, self.covs_cplx[labels[yi], :, :] @ A.conj().T, covs_Cy_inv[labels[yi], :, :], A @ mean_h)
+            else:
+                # use predicted probabilites to compute weighted sum of estimators
+                proba = self.predict_proba_cplx(y_for_prediction)
+                for yi in range(y.shape[0]):
+                    # indices for probabilites in descending order
+                    idx_sort = np.argsort(proba[yi, :])[::-1]
+                    for argproba in idx_sort[:n_summands_or_proba]:
+                        mean_h = self.means_cplx[argproba, :]
+                        h_est[yi, :] += proba[yi, argproba] * self._lmmse_formula(
+                            y[yi, :], mean_h, self.covs_cplx[argproba, :, :] @ A.conj().T, covs_Cy_inv[argproba, :, :], A @ mean_h)
+                    h_est[yi, :] /= np.sum(proba[yi, idx_sort[:n_summands_or_proba]])
+        elif n_summands_or_proba == 'all':
+            # use all predicted probabilities to compute weighted sum of estimators
+            proba = self.predict_proba_cplx(y_for_prediction)
+            for yi in range(y.shape[0]):
+                for argproba in range(proba.shape[1]):
+                    mean_h = self.means_cplx[argproba, :]
+                    h_est[yi, :] += proba[yi, argproba] * self._lmmse_formula(
+                        y[yi, :], mean_h, self.covs_cplx[argproba, :, :] @ A.conj().T, covs_Cy_inv[argproba, :, :], A @ mean_h)
+        else:
+            # n_summands_or_proba represents a probability
+            # use predicted probabilites to compute weighted sum of estimators
+            proba = self.predict_proba_cplx(y_for_prediction)
+            for yi in range(y.shape[0]):
+                # probabilities and corresponding indices in descending order
+                idx_sort = np.argsort(proba[yi, :])[::-1]
+                nr_proba = np.searchsorted(np.cumsum(proba[yi, idx_sort]), n_summands_or_proba) + 1
+                for argproba in idx_sort[:nr_proba]:
+                    mean_h = self.means_cplx[argproba, :]
+                    h_est[yi, :] += proba[yi, argproba] * self._lmmse_formula(
+                        y[yi, :], mean_h, self.covs_cplx[argproba, :, :] @ A.conj().T, covs_Cy_inv[argproba, :, :], A @ mean_h)
+                h_est[yi, :] /= np.sum(proba[yi, idx_sort[:nr_proba]])
+
+        return h_est
+
+    def _prepare_for_prediction(self, y, A, snr_dB):
+        """
+        Replace the GMM's means and covariance matrices by the means and
+        covariance matrices of the observation. Further, in case of diagonal
+        matrices, FFT-transform the observation.
+        """
+        sigma2 = 10 ** (-snr_dB / 10)
+
+        if self.gm.covariance_type == 'diag':
+            # raise error if A is not identity or quadratic matrix
+            try:
+                diff = np.sum(np.abs(A - np.eye(A.shape[0])) ** 2)
+                if diff > 1e-12:
+                    NotImplementedError(f'Estimation for covariance_type = {self.gm.covariance_type} with arbitrary matrix A is not implemented.')
+            except:
+                raise NotImplementedError(f'Estimation for covariance_type = {self.gm.covariance_type} with arbitrary matrix A is not implemented.')
+
+            # update GMM covs
+            covs_gm = self.gm.covariances_.copy()
+            sigma2_diag = sigma2 * np.ones(covs_gm.shape[-1])
+            for i in range(covs_gm.shape[0]):
+                covs_gm[i, :] = covs_gm[i, :] + sigma2_diag
+            self.gm.covariances_ = covs_gm.copy()      # this has no effect
+            self.gm.precisions_cholesky_ = compute_precision_cholesky(covs_gm, covariance_type='diag')
+
+            # FFT of observation
+            if 'block-diag' in self.params:
+                y_for_prediction = np.squeeze(self.F2 @ np.expand_dims(y, 2))
+            else:
+                y_for_prediction = np.fft.fft(y, axis=1) / np.sqrt(y.shape[-1])
+        elif self.gm.covariance_type == 'full':
+            # update GMM means
+            Am = np.squeeze(np.matmul(A, np.expand_dims(self.means_cplx, axis=2)))
+            # handle the case of only one GMM component
+            if Am.ndim == 1:
+                self.gm.means_ = Am[None, :]
+            else:
+                self.gm.means_ = Am
+
+            # update GMM covs
+            covs_gm = self.covs_cplx.copy()
+            covs_gm = np.matmul(np.matmul(A, covs_gm), A.conj().T)
+            sigma2_diag = sigma2 * np.eye(covs_gm.shape[-1])
+            for i in range(covs_gm.shape[0]):
+                covs_gm[i, :, :] = covs_gm[i, :, :] + sigma2_diag
+            self.gm.covariances_ = covs_gm.copy()      # this has no effect
+            self.gm.precisions_cholesky_ = compute_precision_cholesky(covs_gm, covariance_type='full')
+
+            # update GMM feature number
+            self.gm.n_features_in_ = A.shape[0]
+
+            y_for_prediction = y
+        else:
+            raise NotImplementedError(f'Estimation for covariance_type = {self.gm.covariance_type} is not implemented.')
+
+        # precompute the inverse matrices
+        cov_noise = sigma2 * np.eye(y.shape[1], dtype=complex)
+        covs_Cy_inv = np.zeros([self.covs_cplx.shape[0], A.shape[0], A.shape[0]], dtype=complex)
+        for i in range(self.covs_cplx.shape[0]):
+            covs_Cy_inv[i, :, :] = np.linalg.pinv(A @ self.covs_cplx[i, :, :] @ A.conj().T + cov_noise)
+
+        return y_for_prediction, covs_Cy_inv
+
+    def _lmmse_formula(self, y, mean_h, cov_h, cov_y_inv, mean_y):
+        return mean_h + cov_h @ (cov_y_inv @ (y - mean_y))
 
 
-        y = np.concatenate(
-            [np.full(sample, j, dtype=int) for j, sample in enumerate(n_samples_comp)]
-        )
-
-        return (X, y)
-
-    def predict_cplx(self, X):
+    def _predict_cplx(self, X):
         """Predict the labels for the data samples in X using trained model.
 
                 Parameters
@@ -305,6 +450,7 @@ class GaussianMixtureCplx:
         precisions_chol : array-like
             Cholesky decompositions of the precision matrices.
             'full' : shape of (n_components, n_features, n_features)
+            'tied' : shape of (n_features, n_features)
             'diag' : shape of (n_components, n_features)
             'spherical' : shape of (n_components,)
         covariance_type : {'full', 'tied', 'diag', 'spherical'}
@@ -333,16 +479,9 @@ class GaussianMixtureCplx:
                     - 2.0 * np.real(np.dot(X, (means.conj() * precisions).T))
                     + np.dot(np.abs(X) ** 2, precisions.T)
             )
-        elif covariance_type == "spherical":
-            precisions = np.abs(precisions_chol) ** 2
-            log_prob = (
-                    np.sum(np.abs(means) ** 2, 1) * precisions
-                    - 2 * np.real(np.dot(X, means.conj().T) * precisions)
-                    + np.outer((X.conj() * X).sum(axis=1), precisions)
-            )
         # Since we are using the precision of the Cholesky decomposition,
         # `- log_det_precision` becomes `+ 2 * log_det_precision_chol`
-        return -(n_features * np.log(np.pi) + np.real(log_prob)) + 2*log_det
+        return -(n_features * np.log(np.pi) + log_prob) + 2*log_det
 
     def fit_cplx(self, X, y=None):
         """Estimate model parameters with the EM algorithm.
@@ -393,18 +532,9 @@ class GaussianMixtureCplx:
         labels : array, shape (n_samples,)
             Component labels.
         """
-        # X = _check_X(X, self.n_components, ensure_min_samples=2)
+        #X = _check_X(X, self.n_components, ensure_min_samples=2)
         self.gm._check_n_features(X, reset=True)
-        self.gm._check_parameters(X)
-
-        # self.gm._validate_params()
-
-        if X.shape[0] < self.gm.n_components:
-            raise ValueError(
-                "Expected n_samples >= n_components "
-                f"but got n_components = {self.gm.n_components}, "
-                f"n_samples = {X.shape[0]}"
-            )
+        #self.gm._check_initial_parameters(X)
 
         # if we enable warm_start, we will have a unique initialisation
         do_init = not(self.gm.warm_start and hasattr(self, 'converged_'))
@@ -413,7 +543,7 @@ class GaussianMixtureCplx:
         max_lower_bound = -np.infty
         self.gm.converged_ = False
 
-        random_state = check_random_state(self.gm.random_state)
+        random_state = ut.check_random_state(self.gm.random_state)
 
         n_samples, _ = X.shape
         for init in range(n_init):
@@ -480,7 +610,7 @@ class GaussianMixtureCplx:
 
         if self.gm.init_params == 'kmeans':
             resp = np.zeros((n_samples, self.gm.n_components))
-            X_real = cplx2real(X, axis=1)
+            X_real = ut.cplx2real(X, axis=1)
             label = cluster.KMeans(n_clusters=self.gm.n_components, n_init=1,
                                    random_state=random_state).fit(X_real).labels_
             resp[np.arange(n_samples), label] = 1
@@ -644,14 +774,13 @@ class GaussianMixtureCplx:
             The covariance matrix of the current components.
             The shape depends of the covariance_type.
         """
-        nk = np.real(resp).sum(axis=0) + 10 * np.finfo(resp.dtype).eps
+        nk = resp.sum(axis=0) + 10 * np.finfo(resp.dtype).eps
         means = np.dot(resp.T, X) / nk[:, np.newaxis]
         if self.params['zero_mean']:
             means = np.zeros_like(means)
         covariances = {"full": self.estimate_gaussian_covariances_full,
                        "diag": self.estimate_gaussian_covariances_diag,
                        "inv-em": self.estimate_gaussian_covariances_inv,
-                       "spherical": self.estimate_gaussian_covariances_spherical,
                        }[covariance_type](resp, X, nk, means, reg_covar)
         return nk, means, covariances
 
@@ -706,7 +835,7 @@ class GaussianMixtureCplx:
         avg_X2 = np.dot(resp.T, X * X.conj()) / nk[:, np.newaxis]
         avg_means2 = np.abs(means) ** 2
         avg_X_means = means.conj() * np.dot(resp.T, X) / nk[:, np.newaxis]
-        return np.real(avg_X2 - 2.0 * np.real(avg_X_means) + avg_means2) + reg_covar + 0j
+        return avg_X2 - 2.0 * np.real(avg_X_means) + avg_means2 + reg_covar
 
     def estimate_gaussian_covariances_inv(self, resp, X, nk, means, reg_covar):
         """Estimate the Topelitz-structured covariance matrices.
@@ -743,25 +872,3 @@ class GaussianMixtureCplx:
             covariances[k] = np.multiply(self.F2.conj().T, self.gm.Sigma[k]) @ self.F2
             covariances[k].flat[::n_features + 1] += reg_covar
         return covariances
-
-    def estimate_gaussian_covariances_spherical(self, resp, X, nk, means, reg_covar):
-        """Estimate the full covariance matrices.
-
-        Parameters
-        ----------
-        resp : array-like of shape (n_samples, n_components)
-
-        X : array-like of shape (n_samples, n_features)
-
-        nk : array-like of shape (n_components,)
-
-        means : array-like of shape (n_components, n_features)
-
-        reg_covar : float
-
-        Returns
-        -------
-        covariances : array, shape (n_components, n_features, n_features)
-            The covariance matrix of the current components.
-        """
-        return np.real(self.estimate_gaussian_covariances_diag(resp, X, nk, means, reg_covar).mean(1)) + 0j
