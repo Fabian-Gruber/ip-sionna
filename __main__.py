@@ -159,15 +159,23 @@ def __main__():
 
         df = pd.DataFrame(nmse_data)
 
-        # Save to CSV
-        csv_file_path = f'/simulation_results/nmse'  # Change to your desired path
-        os.makedirs(csv_file_path, exist_ok=True)
 
-        sim_results_csv = os.path.join(csv_file_path, 'csv', f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.csv')
+        base_dir = f'/simulation_results/nmse'
+
+        # Subdirectories for CSV and plots
+        csv_dir = os.path.join(base_dir, 'csv')
+        plots_dir = os.path.join(base_dir, 'plots')
+
+        # Create these directories if they don't exist
+        os.makedirs(csv_dir, exist_ok=True)
+        os.makedirs(plots_dir, exist_ok=True)
+
+        # Define full paths for the CSV file and plot image
+        sim_results_csv = os.path.join(csv_dir, f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.csv')
+        sim_results_plot = os.path.join(plots_dir, f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.png')
+
+        # Save the DataFrame and the plot
         df.to_csv(sim_results_csv, index=False)
-
-        sim_results_plot = os.path.join(csv_file_path, 'plots', f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.png')
-
 
         # plot all three nmse curves over ebno_db
         plt.figure()

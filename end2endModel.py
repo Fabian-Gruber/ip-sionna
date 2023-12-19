@@ -45,7 +45,7 @@ class end2endModel(tf.keras.Model):
             os.makedirs(model_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
             # Define the full path for the model file
-            model_filename = os.path.join(model_dir, f'gmm_model_{n_gmm_components}x{training_batch_size}x{covariance_type}.pkl')
+            model_filename = os.path.join(model_dir, f'gmm_model_{n_gmm_components}x{training_batch_size}x{covariance_type}x{n_antennas}x{n_coherence}.pkl')
 
             if os.path.exists(model_filename):
                 print(f"Loading GMM model from {model_filename}")
