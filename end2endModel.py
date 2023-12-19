@@ -41,7 +41,7 @@ class end2endModel(tf.keras.Model):
         self.mmse_estimator = gme.genie_mmse_estimator()
 
         if self.estimator == 'gmm':
-            model_dir = '/training_samples_gmm/training_models'
+            model_dir = './training_samples_gmm/training_models'
             os.makedirs(model_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
             # Define the full path for the model file

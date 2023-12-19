@@ -160,7 +160,7 @@ def __main__():
         df = pd.DataFrame(nmse_data)
 
 
-        base_dir = f'/simulation_results/nmse'
+        base_dir = f'./simulation_results/nmse'
 
         # Subdirectories for CSV and plots
         csv_dir = os.path.join(base_dir, 'csv')
