@@ -22,6 +22,6 @@ def channel_generation(batch_size, n_coherences, n_antennas):
         # Calculate the covariance matrix for each sample
         C[i, :, :] = np.transpose(toeplitz(t[i, :]))
     
-    print('Generated ' + str(batch_size) + ' SIMO channel samples of size ' + str(n_antennas) + 'x1.')
+    # print('Generated ' + str(batch_size) + ' SIMO channel samples of size ' + str(n_antennas) + 'x1.')
     
     return h, C
