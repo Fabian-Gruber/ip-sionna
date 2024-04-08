@@ -4,11 +4,24 @@ import numpy as np
 import pandas as pd
 import os
 import sionna as sn
+import time
+import threading
 
 import tensorflow as tf
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
+# Function to perform a non-intrusive command on the server
+def keep_alive():
+    while True:
+        os.system('ls > /dev/null')
+        time.sleep(300)  # sleep for 300 seconds (5 minutes)
+
+# Start the keep-alive thread
+def start_keep_alive_thread():
+    threading.Thread(target=keep_alive, daemon=True).start()
+
 
 def __main__():
     print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
@@ -19,184 +32,17 @@ def __main__():
     batch_size = 1024 # How many examples are processed by Sionna in parallel
     n_coherence = 1
     n_antennas = 64
-    estimator = 'gmm'
     output_quantity = 'ber'
     n_gmm_components = 128
     iterations = 10
     ebno_dbs = np.linspace(ebno_db_min, ebno_db_max, iterations)
-    code_rate = 0
+    code_rate = 0.9
     code = 'ldpc'
+    monte_carlo_iterations = 100
+
+    start_keep_alive_thread()
 
     if output_quantity == 'ber':
-
-        # ber_plots = sn.utils.PlotBER("SC over 3GPP channel")
-
-        # coded_gmm_full_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol,
-        #     block_length=block_length,
-        #     n_coherence=n_coherence,
-        #     n_antennas=n_antennas,
-        #     training_batch_size=100000,
-        #     covariance_type='full',
-        #     n_gmm_components=n_gmm_components,
-        #     estimator='gmm',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-
-        # coded_sample_cov_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol, 
-        #     block_length=block_length, 
-        #     n_coherence=n_coherence, 
-        #     n_antennas=n_antennas,
-        #     training_batch_size=100000,
-        #     covariance_type='full',
-        #     n_gmm_components=1,
-        #     estimator='gmm',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-  
-        # coded_gmm_circulant_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol, 
-        #     block_length=block_length, 
-        #     n_coherence=n_coherence, 
-        #     n_antennas=n_antennas,
-        #     training_batch_size=30000,
-        #     covariance_type='circulant',
-        #     n_gmm_components=n_gmm_components,
-        #     estimator='gmm',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-
-        # coded_mmse_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol, 
-        #     block_length=block_length, 
-        #     n_coherence=n_coherence, 
-        #     n_antennas=n_antennas,
-        #     estimator='mmse',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-
-        # coded_ls_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol, 
-        #     block_length=block_length, 
-        #     n_coherence=n_coherence, 
-        #     n_antennas=n_antennas,
-        #     estimator='ls',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-
-        # coded_real_model = e2e(
-        #     num_bits_per_symbol=num_bits_per_symbol,
-        #     block_length=block_length,
-        #     n_coherence=n_coherence,
-        #     n_antennas=n_antennas,
-        #     estimator='real',
-        #     code_rate=code_rate,
-        #     output_quantity='ber'
-        # )
-
-        # ber_plots.simulate(
-        #     coded_gmm_full_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100,
-        #     legend="GMM Full Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1,
-        #     show_fig=False
-        # )
-
-        # ber_plots.simulate(
-        #     coded_sample_cov_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100, # simulate until 100 block errors occured
-        #     legend="Sample Covariance Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1, # run 100 Monte-Carlo simulations (each with batch_size samples)
-        #     show_fig=False
-        # )
-
-        # ber_plots.simulate(
-        #     coded_gmm_circulant_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100, # simulate until 100 block errors occured
-        #     legend="GMM Circulant Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1, # run 100 Monte-Carlo simulations (each with batch_size samples)
-        #     show_fig=False
-        # )
-
-        # ber_plots.simulate(
-        #     coded_mmse_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100, # simulate until 100 block errors occured
-        #     legend="Genie MMSE Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1, # run 100 Monte-Carlo simulations (each with batch_size samples)
-        #     show_fig=False
-        # )
-
-        # ber_plots.simulate(
-        #     coded_ls_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100, # simulate until 100 block errors occured
-        #     legend="LSE Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1, # run 100 Monte-Carlo simulations (each with batch_size samples)
-        #     show_fig=False
-        # )
-
-        # ber_plots.simulate(
-        #     coded_real_model,
-        #     ebno_dbs=np.linspace(ebno_db_min, ebno_db_max, 10),
-        #     batch_size=batch_size,
-        #     num_target_block_errors=100,
-        #     legend="Real Coded",
-        #     soft_estimates=True,
-        #     max_mc_iter=1,
-        #     show_fig=False
-        # )
-
-        # simulation_data = []
-
-        # for i in range(len(ber_plots.legend)):
-        #     model_description = ber_plots.legend[i]
-        #     for snr, ber in zip(ber_plots.snr[i], ber_plots.ber[i]):
-        #         simulation_data.append({
-        #             'Model Description': model_description,
-        #             'SNR (dB)': snr,
-        #             'BER': ber
-        #         })
-        
-        # df = pd.DataFrame(simulation_data)
-
-        # base_dir = './simulation_results/ber'
-
-        # csv_dir = os.path.join(base_dir, 'csv')
-        # plots_dir = os.path.join(base_dir, 'plots')
-
-        # os.makedirs(csv_dir, exist_ok=True)
-        # os.makedirs(plots_dir, exist_ok=True)
-
-        # sim_results_csv = os.path.join(csv_dir, f'BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{code}x{code_rate}.csv')
-        # sim_results_plot = os.path.join(plots_dir, f'BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{code}x{code_rate}.png')
-
-        # df.to_csv(sim_results_csv, index=False)
-
-        # ber_plots(
-        #     show_ber=True,
-        #     save_fig=True,
-        #     path=sim_results_plot
-        # )
 
         uncoded_e2e_model_ber_ls = e2e(
             num_bits_per_symbol=num_bits_per_symbol, 
@@ -204,7 +50,9 @@ def __main__():
             n_coherence=n_coherence, 
             n_antennas=n_antennas, 
             estimator='ls',
-            output_quantity='ber'
+            output_quantity='ber',
+            code_rate=code_rate,
+            code=code
         )
 
         uncoded_e2e_model_ber_mmse = e2e(
@@ -213,7 +61,9 @@ def __main__():
             n_coherence=n_coherence, 
             n_antennas=n_antennas, 
             estimator='mmse',
-            output_quantity='ber'
+            output_quantity='ber',
+            code_rate=code_rate,
+            code=code
         )
 
         uncoded_e2e_model_ber_gmm_circulant = e2e(
@@ -225,7 +75,9 @@ def __main__():
             covariance_type='circulant',
             n_gmm_components=n_gmm_components,
             estimator='gmm',
-            output_quantity='ber'
+            output_quantity='ber',
+            code_rate=code_rate,
+            code=code
         )
 
         uncoded_e2e_model_ber_gmm_full = e2e(
@@ -238,7 +90,9 @@ def __main__():
             n_gmm_components=n_gmm_components,
             estimator='gmm',
             output_quantity='ber',
-            gmm_max_iterations=1000
+            gmm_max_iterations=1000,
+            code_rate=code_rate,
+            code=code
         )
 
         uncoded_e2e_model_ber_sample_cov = e2e(
@@ -250,7 +104,9 @@ def __main__():
             covariance_type='full',
             n_gmm_components=1,
             estimator='gmm',
-            output_quantity='ber'
+            output_quantity='ber',
+            code_rate=code_rate,
+            code=code
         )
 
         uncoded_e2e_model_ber_real = e2e(
@@ -259,54 +115,177 @@ def __main__():
             n_coherence=n_coherence,
             n_antennas=n_antennas,
             estimator='real',
-            output_quantity='ber'
+            output_quantity='ber',
+            code_rate=code_rate,
+            code=code
         )
 
-        vertically_stacked_mmse_ber_list = []
-        vertically_stacked_ls_ber_list = []
-        vertically_stacked_gmm_circulant_ber_list = []
-        vertically_stacked_gmm_full_ber_list = []
-        vertically_stacked_sample_cov_ber_list = []
-        vertically_stacked_real_ber_list = []
+        # vertically_stacked_mmse_ber_list = []
+        # vertically_stacked_ls_ber_list = []
+        # vertically_stacked_gmm_circulant_ber_list = []
+        # vertically_stacked_gmm_full_ber_list = []
+        # vertically_stacked_sample_cov_ber_list = []
+        # vertically_stacked_real_ber_list = []
 
-        for j in range(iterations):
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_ls(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_ls_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_ls_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_ls_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+        accumulated_ls_ber = [0] * iterations
+        accumulated_mmse_ber = [0] * iterations
+        accumulated_gmm_circulant_ber = [0] * iterations
+        accumulated_gmm_full_ber = [0] * iterations
+        accumulated_sample_cov_ber = [0] * iterations
+        accumulated_real_ber = [0] * iterations
 
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_mmse(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_mmse_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_mmse_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_mmse_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
 
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_circulant(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_gmm_circulant_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_gmm_circulant_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_circulant_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+        for mc in range(monte_carlo_iterations):
+            print(f'Monte Carlo iteration {mc+1}/{monte_carlo_iterations}')
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_ls(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_ls_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_ls_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_ls_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_ls_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_ls_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_ls_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_ls_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_ls(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_ls_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_ls_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_ls_ber[k] = 0
+                        break
 
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_full(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_gmm_full_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_gmm_full_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_full_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_mmse(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_mmse_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_mmse_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_mmse_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_mmse_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_mmse_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_mmse_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_mmse_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_mmse(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_mmse_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_mmse_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_mmse_ber[k] = 0
+                        break
 
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_sample_cov(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_sample_cov_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_sample_cov_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_sample_cov_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_circulant(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_gmm_circulant_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_gmm_circulant_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_circulant_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_gmm_circulant_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_circulant_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_gmm_circulant_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_gmm_circulant_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_gmm_circulant(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_gmm_circulant_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_gmm_circulant_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_gmm_circulant_ber[k] = 0
+                        break
 
-            vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_real(batch_size=batch_size, ebno_db=(-15 + 5*j))
-            bits_hat_real_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-            vertically_stacked_real_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_real_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_full(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_gmm_full_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_gmm_full_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_full_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_gmm_full_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_full_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_gmm_full_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_gmm_full_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_gmm_full(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_gmm_full_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_gmm_full_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_gmm_full_ber[k] = 0
+                        break
 
-        
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_sample_cov(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_sample_cov_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_sample_cov_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_sample_cov_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_sample_cov_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_sample_cov_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_sample_cov_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_sample_cov_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_sample_cov(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_sample_cov_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_sample_cov_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_sample_cov_ber[k] = 0
+                        break
 
-        ls_ber = tf.stack(vertically_stacked_ls_ber_list, axis=0)
+            for j in range(iterations):
+                if code == 'ldpc':
+                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_real(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    bits_hat_real_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
+                    # vertically_stacked_real_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_real_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
+                    accumulated_real_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_real_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_real_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_real_ber[k] = 0
+                        break
+                elif code == 'polar':
+                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_real(batch_size=batch_size, ebno_db=(-15 + 5*j))
+                    accumulated_real_ber[j] += tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol))
+                    if accumulated_real_ber[j] == 0.0 and mc > 0:
+                        for k in range(j, iterations):
+                            accumulated_real_ber[k] = 0
+                        break
+            print(f'Keep-alive signal at {time.ctime()} after Monte Carlo iteration {mc+1}')
+            time.sleep(1)
 
-        mmse_ber = tf.stack(vertically_stacked_mmse_ber_list, axis=0)
 
-        gmm_circulant_ber = tf.stack(vertically_stacked_gmm_circulant_ber_list, axis=0)
+            # print results for each monte carlo iteration
+            print(f'LS BER: {[ber / (mc+1) for ber in accumulated_ls_ber]}')
+            print(f'MMSE BER: {[ber / (mc+1) for ber in accumulated_mmse_ber]}')
+            print(f'GMM Circulant BER: {[ber / (mc+1) for ber in accumulated_gmm_circulant_ber]}')
+            print(f'GMM Full BER: {[ber / (mc+1) for ber in accumulated_gmm_full_ber]}')
+            print(f'Sample Covariance BER: {[ber / (mc+1) for ber in accumulated_sample_cov_ber]}')
+            print(f'Real BER: {[ber / (mc+1) for ber in accumulated_real_ber]}')
 
-        gmm_full_ber = tf.stack(vertically_stacked_gmm_full_ber_list, axis=0)
+        # ls_ber = tf.stack(vertically_stacked_ls_ber_list, axis=0)
 
-        sample_cov_ber = tf.stack(vertically_stacked_sample_cov_ber_list, axis=0)
+        # mmse_ber = tf.stack(vertically_stacked_mmse_ber_list, axis=0)
 
-        real_ber = tf.stack(vertically_stacked_real_ber_list, axis=0)
+        # gmm_circulant_ber = tf.stack(vertically_stacked_gmm_circulant_ber_list, axis=0)
+
+        # gmm_full_ber = tf.stack(vertically_stacked_gmm_full_ber_list, axis=0)
+
+        # sample_cov_ber = tf.stack(vertically_stacked_sample_cov_ber_list, axis=0)
+
+        # real_ber = tf.stack(vertically_stacked_real_ber_list, axis=0)
+                
+        averaged_ls_ber = [ber / monte_carlo_iterations for ber in accumulated_ls_ber]
+        averaged_mmse_ber = [ber / monte_carlo_iterations for ber in accumulated_mmse_ber]
+        averaged_gmm_circulant_ber = [ber / monte_carlo_iterations for ber in accumulated_gmm_circulant_ber]
+        averaged_gmm_full_ber = [ber / monte_carlo_iterations for ber in accumulated_gmm_full_ber]
+        averaged_sample_cov_ber = [ber / monte_carlo_iterations for ber in accumulated_sample_cov_ber]
+        averaged_real_ber = [ber / monte_carlo_iterations for ber in accumulated_real_ber]
+
+        ls_ber = tf.stack(averaged_ls_ber, axis=0)
+
+        mmse_ber = tf.stack(averaged_mmse_ber, axis=0)
+
+        gmm_circulant_ber = tf.stack(averaged_gmm_circulant_ber, axis=0)
+
+        gmm_full_ber = tf.stack(averaged_gmm_full_ber, axis=0)
+
+        sample_cov_ber = tf.stack(averaged_sample_cov_ber, axis=0)
+
+        real_ber = tf.stack(averaged_real_ber, axis=0)
 
         ber_data = {
             'Eb/N0 (dB)': ebno_dbs,
@@ -332,8 +311,8 @@ def __main__():
         os.makedirs(plots_dir, exist_ok=True)
 
         # Define full paths for the CSV file and plot image
-        sim_results_csv = os.path.join(csv_dir, f'BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{code}x{code_rate}.csv')
-        sim_results_plot = os.path.join(plots_dir, f'BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{code}x{code_rate}.png')
+        sim_results_csv = os.path.join(csv_dir, f"BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{monte_carlo_iterations}x{code}x{code_rate}{'xlist' if (code == 'polar') else ''}.csv")
+        sim_results_plot = os.path.join(plots_dir, f"BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{monte_carlo_iterations}x{code}x{code_rate}{'xlist' if (code == 'polar') else ''}.png")
 
         # Save the DataFrame and the plot
         df.to_csv(sim_results_csv, index=False)
