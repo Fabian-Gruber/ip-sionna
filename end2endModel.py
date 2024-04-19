@@ -95,7 +95,7 @@ class end2endModel(tf.keras.Model):
         
         no = sn.utils.ebnodb2no(ebno_db,
                                 num_bits_per_symbol=self.num_bits_per_symbol,
-                                coderate=1.0)
+                                coderate=self.code_rate)
         
         bits = self.binary_source([batch_size, self.block_length]) # Blocklength set to 1024 bits
         bits = bits[:, self.num_bits_per_symbol:]
@@ -126,7 +126,6 @@ class end2endModel(tf.keras.Model):
 
                 if self.code_rate != 0:
                     llr_ls = tf.TensorArray(dtype=tf.float32, size=tf.cast((self.block_length - self.num_bits_per_symbol) / (self.code_rate * self.num_bits_per_symbol), dtype=tf.int32))
-
                     for i in range(tf.shape(x)[1]):
                         y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
                         y.append(y_i)
@@ -147,7 +146,6 @@ class end2endModel(tf.keras.Model):
 
                 else: 
                     llr_ls = tf.TensorArray(dtype=tf.float32, size=tf.cast((self.block_length - self.num_bits_per_symbol) / self.num_bits_per_symbol, dtype=tf.int32))
-
                     for i in range(tf.shape(x)[1]):
                         #y = h * x + n for all x except first one
                         y_i = self.channel(x[:, i], no, batch_size, self.n_coherence, self.n_antennas, h, C)[0]
@@ -168,7 +166,6 @@ class end2endModel(tf.keras.Model):
                 # bits_hat = tf.where(llr_ls > 0, tf.ones_like(llr_ls), tf.zeros_like(llr_ls))
 
                 # print(f'bit error rate ls at {ebno_db}DB: ', tf.reduce_sum(tf.cast(tf.not_equal(bits, bits_hat), dtype=tf.float32)) / tf.cast(batch_size * self.block_length, dtype=tf.float32))
-
                 return bits, llr_ls
             
 
