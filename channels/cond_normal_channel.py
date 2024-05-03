@@ -26,3 +26,4 @@ class cond_normal_channel(tf.keras.Model):
 
         return y, h, C
 
+    

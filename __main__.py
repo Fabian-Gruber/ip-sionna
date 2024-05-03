@@ -3,590 +3,235 @@ from end2endModel import end2endModel as e2e
 import numpy as np
 import pandas as pd
 import os
+import sys
 import sionna as sn
-import time
-import threading
 
 import tensorflow as tf
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-def __main__():
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-    num_bits_per_symbol = 2
-    block_length = 256
-    ebno_db_min = -5.0 # Minimum value of Eb/N0 [dB] for simulations
-    ebno_db_max = 15.0 # Maximum value of Eb/N0 [dB] for simulations
-    batch_size = 200 # How many examples are processed by Sionna in parallel
-    n_coherence = 1
-    n_antennas = 64
-    output_quantity = 'ber'
-    n_gmm_components = 128
-    iterations = 10
-    ebno_dbs = np.linspace(ebno_db_min, ebno_db_max, iterations)
-    code_rate = 0.9
-    code = 'ldpc'
-    monte_carlo_iterations = 100
-    step_size = 2
-    num_target_block_errors = 1000
+class BER_NMSE_Simulation:
+    def __init__(self, config):
+        self.config = config
+        self.init_models()
+        self.results = {estimator: np.zeros(config['iterations']) for estimator in self.estimators}
+        self.total_block_errors = {estimator: np.zeros(config['iterations']) for estimator in self.estimators}
+        self.mc_iterations = {estimator: np.zeros(config['iterations']) for estimator in self.estimators}
 
-    if output_quantity == 'ber':
+    def init_models(self):
+        """Initialize all required models based on configuration."""
+        self.models = {}
+        self.estimators = ['ls', 'mmse', 'gmm_circulant', 'gmm_full', 'sample_cov', 'real']
+        batch_size = self.config['batch_size']
+        block_length = self.config['block_length']
+        num_bits_per_symbol = self.config['num_bits_per_symbol']
+        n_coherence = self.config['n_coherence']
+        n_antennas = self.config['n_antennas']
+        n_gmm_components = self.config['n_gmm_components']
+        code_rate = self.config['code_rate']
+        code = self.config['code']
+        n_blocks = self.config['n_blocks']
 
-        uncoded_e2e_model_ber_ls = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            estimator='ls',
-            output_quantity='ber',
-            code_rate=code_rate,
-            code=code
-        )
+        for estimator in self.estimators:
+            model = e2e(
+                num_bits_per_symbol=num_bits_per_symbol,
+                block_length=block_length,
+                n_coherence=n_coherence,
+                n_antennas=n_antennas,
+                training_batch_size=(100000 if (estimator == 'gmm_full' or estimator == 'sample_cov') else 30000 if estimator == 'gmm_circulant' else None),
+                covariance_type=('full' if (estimator == 'gmm_full' or estimator == 'sample_cov') else 'circulant' if estimator == 'gmm_circulant' else None),
+                n_gmm_components=(n_gmm_components if (estimator == 'gmm_full' or estimator == 'gmm_circulant') else 1 if estimator == 'sample_cov' else None),
+                estimator=(estimator if (estimator != 'gmm_circulant' and estimator != 'gmm_full' and estimator != 'sample_cov') else 'gmm'),
+                output_quantity=self.config['output_quantity'],
+                code_rate=code_rate,
+                code=code,
+                n_blocks=n_blocks
+            )
+            print(f"Initialized {estimator.upper()} model.")
+            self.models[estimator] = model
 
-        uncoded_e2e_model_ber_mmse = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            estimator='mmse',
-            output_quantity='ber',
-            code_rate=code_rate,
-            code=code
-        )
+    # The following methods are used to run BER and NMSE simulation and collect the results
+    def run_simulation(self):
+        """Run the BER or NMSE simulation across all estimators and conditions."""
+        for estimator in self.estimators:
+            print(f"Running {estimator.upper()} simulation...")
+            for j in range(self.config['iterations']):
+                ebno_db = self.config['ebno_dbs'][j]
+                if self.config['output_quantity'] == 'ber':
+                    self.simulate_ber_estimator(estimator, ebno_db, j)
+                    if self.results[estimator][j] == 0 and self.mc_iterations[estimator][j] > 0:
+                        # for k in range(j + 1, self.config['iterations']):
+                        #     self.results[estimator][k] = 0
+                        #     self.total_block_errors[estimator][k] = 0
+                        #     self.mc_iterations[estimator][k] = 0
+                        print(f"Stopping early at Eb/N0 {ebno_db}dB due to zero BER.")
+                        break
+                elif self.config['output_quantity'] == 'nmse':
+                    self.simulate_nmse_estimator(estimator, ebno_db, j)
 
-        uncoded_e2e_model_ber_gmm_circulant = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            training_batch_size=30000,
-            covariance_type='circulant',
-            n_gmm_components=n_gmm_components,
-            estimator='gmm',
-            output_quantity='ber',
-            code_rate=code_rate,
-            code=code
-        )
+    def simulate_ber_estimator(self, estimator, ebno_db, iteration):
+        model = self.models[estimator]
+        ber_accumulated = 0
+        block_errors = 0
+        mc_count = 0
+        last_line_length = 0  # Track the length of the last printed line
 
-        uncoded_e2e_model_ber_gmm_full = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            training_batch_size=100000,
-            covariance_type='full',
-            n_gmm_components=n_gmm_components,
-            estimator='gmm',
-            output_quantity='ber',
-            gmm_max_iterations=1000,
-            code_rate=code_rate,
-            code=code
-        )
+        for mc in range(self.config['monte_carlo_iterations']):
+            bits, llrs = model(batch_size=self.config['batch_size'], ebno_db=ebno_db)
+            bits_hat = tf.where(llrs > 0, tf.ones_like(bits), tf.zeros_like(bits))
+            bit_errors_bool = tf.not_equal(bits, bits_hat)
+            block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
+            block_errors += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
 
-        uncoded_e2e_model_ber_sample_cov = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas,
-            training_batch_size=100000,
-            covariance_type='full',
-            n_gmm_components=1,
-            estimator='gmm',
-            output_quantity='ber',
-            code_rate=code_rate,
-            code=code
-        )
+            bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
+            ber_accumulated += tf.reduce_sum(bit_errors) / (self.config['batch_size'] * self.config['n_blocks'] * (self.config['block_length'] - self.config['num_bits_per_symbol']))
 
-        uncoded_e2e_model_ber_real = e2e(
-            num_bits_per_symbol=num_bits_per_symbol,
-            block_length=block_length,
-            n_coherence=n_coherence,
-            n_antennas=n_antennas,
-            estimator='real',
-            output_quantity='ber',
-            code_rate=code_rate,
-            code=code
-        )
+            current_line = f"\r{estimator.upper()} {ebno_db}dB: Current BER: {ber_accumulated / (mc + 1)} ||| Blocks with Errors: {block_errors} ||| MC Run {mc + 1}/{self.config['monte_carlo_iterations']}"
+            sys.stdout.write(current_line)
+            sys.stdout.flush()
+            last_line_length = len(current_line)
 
-        accumulated_ls_ber = [0] * iterations
-        accumulated_mmse_ber = [0] * iterations
-        accumulated_gmm_circulant_ber = [0] * iterations
-        accumulated_gmm_full_ber = [0] * iterations
-        accumulated_sample_cov_ber = [0] * iterations
-        accumulated_real_ber = [0] * iterations
-
-        total_block_errors_ls = [0] * iterations
-        total_block_errors_mmse = [0] * iterations
-        total_block_errors_gmm_circulant = [0] * iterations
-        total_block_errors_gmm_full = [0] * iterations
-        total_block_errors_sample_cov = [0] * iterations
-        total_block_errors_real = [0] * iterations
-
-        contributing_mc_iterations_ls = [0] * iterations
-        contributing_mc_iterations_mmse = [0] * iterations
-        contributing_mc_iterations_gmm_circulant = [0] * iterations
-        contributing_mc_iterations_gmm_full = [0] * iterations
-        contributing_mc_iterations_sample_cov = [0] * iterations
-        contributing_mc_iterations_real = [0] * iterations
-
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_ls(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_ls_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_ls_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_ls_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_ls_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_ls[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)  # Cast bit errors to float for summing
-                    accumulated_ls_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_ls(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_ls[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)  # Cast bit errors to float for summing
-                    accumulated_ls_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-
-                if total_block_errors_ls[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_ls[j] += 1
-
-            print(f'LS {-5 + 2*j}dB: BER: {accumulated_ls_ber[j] / contributing_mc_iterations_ls[j]} ||| Total Block Errors: {total_block_errors_ls[j]} ||| MC Iterations: {contributing_mc_iterations_ls[j]}')
-            if accumulated_ls_ber[j] == 0.0:
-                for k in range(j, iterations):
-                    accumulated_ls_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
+            if block_errors > self.config['n_target_block_errors'] and mc > 0:
+                # Clear the current line before printing the stop message
+                sys.stdout.write('\r' + ' ' * last_line_length + '\r')
+                sys.stdout.flush()
+                print(f"Stopping early at Eb/N0 {ebno_db}dB due to exceeding block error target.")
                 break
-            
+            mc_count += 1
 
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_mmse(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_mmse_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_mmse_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_mmse_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_mmse_j)
+        # Clear the line one more time before printing final results
+        sys.stdout.write('\r' + ' ' * last_line_length + '\r')
+        sys.stdout.flush()
+        # Print the final results
+        self.results[estimator][iteration] = ber_accumulated / mc_count
+        self.total_block_errors[estimator][iteration] = block_errors
+        self.mc_iterations[estimator][iteration] = mc_count
+        print(f"{estimator.upper()} {ebno_db}dB: Final BER: {self.results[estimator][iteration]} ||| Total Blocks with Errors: {block_errors} ||| Total MC Iterations: {mc_count}")
 
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
+    def simulate_nmse_estimator(self, estimator, ebno_db, iteration):
+        model = self.models[estimator]
+        h, h_hat = model(batch_size=self.config['batch_size'], ebno_db=ebno_db)
+        nmse = tf.reduce_mean(tf.square(tf.abs(h - h_hat))).numpy()
+        self.results[estimator][iteration] = nmse
+        print(f"{estimator.upper()} Eb/N0 {ebno_db}dB: NMSE: {nmse}")        
 
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_mmse[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_mmse_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_mmse(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_mmse[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_mmse_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-                    
-                if total_block_errors_mmse[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_mmse[j] += 1
-            print(f'MMSE {-5 + 2*j}dB: BER: {accumulated_mmse_ber[j] / contributing_mc_iterations_mmse[j]} ||| Total Block Errors: {total_block_errors_mmse[j]} ||| MC Iterations: {contributing_mc_iterations_mmse[j]}')
-            if accumulated_mmse_ber[j] == 0.0:
-                for k in range(j, iterations):
-                    accumulated_mmse_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
-                break
-
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_circulant(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_gmm_circulant_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_gmm_circulant_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_circulant_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_circulant_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_gmm_circulant[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_gmm_circulant_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_gmm_circulant(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_gmm_circulant[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_gmm_circulant_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-                    
-                if total_block_errors_gmm_circulant[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_gmm_circulant[j] += 1
-            print(f'GMM Circulant {-5 + 2*j}dB: BER: {accumulated_gmm_circulant_ber[j] / contributing_mc_iterations_gmm_circulant[j]} ||| Total Block Errors: {total_block_errors_gmm_circulant[j]} ||| MC Iterations: {contributing_mc_iterations_gmm_circulant[j]}')
-            if accumulated_gmm_circulant_ber[j] == 0.0:
-                for k in range(j, iterations):
-                    accumulated_gmm_circulant_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
-                break
-
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_gmm_full(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_gmm_full_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_gmm_full_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_full_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_gmm_full_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_gmm_full[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_gmm_full_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_gmm_full(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_gmm_full[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_gmm_full_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                if total_block_errors_gmm_full[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_gmm_full[j] += 1
-            print(f'GMM Full {-5 + 2*j}dB: BER: {accumulated_gmm_full_ber[j] / contributing_mc_iterations_gmm_full[j]} ||| Total Block Errors: {total_block_errors_gmm_full[j]} ||| MC Iterations: {contributing_mc_iterations_gmm_full[j]}')
-            if accumulated_gmm_full_ber[j] == 0.0:
-                for k in range(j, iterations):
-                    accumulated_gmm_full_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
-                break
-
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_sample_cov(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_sample_cov_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_sample_cov_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_sample_cov_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_sample_cov_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_sample_cov[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_sample_cov_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_sample_cov(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_sample_cov[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_sample_cov_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                if total_block_errors_sample_cov[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_sample_cov[j] += 1
-            print(f'Sample Covariance {-5 + 2*j}dB: BER: {accumulated_sample_cov_ber[j] / contributing_mc_iterations_sample_cov[j]} ||| Total Block Errors: {total_block_errors_sample_cov[j]} ||| MC Iterations: {contributing_mc_iterations_sample_cov[j]}')
-            if accumulated_sample_cov_ber[j] == 0.0:
-                for k in range(j, iterations):
-                    accumulated_sample_cov_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
-                break
-
-        for j in range(iterations):
-            for mc in range(monte_carlo_iterations):
-                if code == 'ldpc':
-                    vertically_stacked_bits_j, vertically_stacked_llrs_j = uncoded_e2e_model_ber_real(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bits_hat_real_j = tf.where(vertically_stacked_llrs_j > 0, tf.ones_like(vertically_stacked_bits_j), tf.zeros_like(vertically_stacked_bits_j))
-                    # vertically_stacked_real_ber_list.append(tf.reduce_sum(tf.cast(tf.not_equal(vertically_stacked_bits_j, bits_hat_real_j), dtype=tf.float32)) / (batch_size * (block_length - num_bits_per_symbol)))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, bits_hat_real_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_real[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_real_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                elif code == 'polar':
-                    vertically_stacked_bits_j, vertically_stacked_bits_hat_j = uncoded_e2e_model_ber_real(batch_size=batch_size, ebno_db=(-5 + 2*j))
-                    bit_errors_bool = tf.not_equal(vertically_stacked_bits_j, vertically_stacked_bits_hat_j)
-
-                    # Sum bit errors per block to find blocks with any errors (result is a boolean tensor)
-                    block_errors_bool = tf.reduce_any(bit_errors_bool, axis=1)
-
-                    # Count the number of True values in block_errors_bool to get the total number of block errors
-                    total_block_errors_real[j] += tf.reduce_sum(tf.cast(block_errors_bool, dtype=tf.int32))
-
-                    # Calculate bit error rate
-                    bit_errors = tf.cast(bit_errors_bool, dtype=tf.float32)
-                    accumulated_real_ber[j] += tf.reduce_sum(bit_errors) / (batch_size * (block_length - num_bits_per_symbol))
-
-                if total_block_errors_real[j] > num_target_block_errors and mc > 0:
-                    print(f'Breaking at SNR point {-5 + 2*j}dB due to exceeding max number of block errors.')
-                    break
-                contributing_mc_iterations_real[j] += 1
-            print(f'Real {-5 + 2*j}dB: BER: {accumulated_real_ber[j] / contributing_mc_iterations_real[j]} ||| Total Block Errors: {total_block_errors_real[j]} ||| MC Iterations: {contributing_mc_iterations_real[j]}')
-            if accumulated_real_ber[j] == 0.0 and mc > 0:
-                for k in range(j, iterations):
-                    accumulated_real_ber[k] = tf.constant(0.0)
-                print(f'Breaking at SNR point {-5 + 2*j}dB due to achieving 0 BER.')
-                break
-                
-        averaged_ls_ber = [accumulated_ls_ber[j] / contributing_mc_iterations_ls[j] if contributing_mc_iterations_ls[j] > 0 else 0 for j in range(iterations)]
-        averaged_mmse_ber = [accumulated_mmse_ber[j] / contributing_mc_iterations_mmse[j] if contributing_mc_iterations_mmse[j] > 0 else 0 for j in range(iterations)]
-        averaged_gmm_circulant_ber = [accumulated_gmm_circulant_ber[j] / contributing_mc_iterations_gmm_circulant[j] if contributing_mc_iterations_gmm_circulant[j] > 0 else 0 for j in range(iterations)]
-        averaged_gmm_full_ber = [accumulated_gmm_full_ber[j] / contributing_mc_iterations_gmm_full[j] if contributing_mc_iterations_gmm_full[j] > 0 else 0 for j in range(iterations)]
-        averaged_sample_cov_ber = [accumulated_sample_cov_ber[j] / contributing_mc_iterations_sample_cov[j] if contributing_mc_iterations_sample_cov[j] > 0 else 0 for j in range(iterations)]
-        averaged_real_ber = [accumulated_real_ber[j] / contributing_mc_iterations_real[j] if contributing_mc_iterations_real[j] > 0 else 0 for j in range(iterations)]
-
-        ls_ber = tf.stack(averaged_ls_ber, axis=0)
-
-        mmse_ber = tf.stack(averaged_mmse_ber, axis=0)
-
-        gmm_circulant_ber = tf.stack(averaged_gmm_circulant_ber, axis=0)
-
-        gmm_full_ber = tf.stack(averaged_gmm_full_ber, axis=0)
-
-        sample_cov_ber = tf.stack(averaged_sample_cov_ber, axis=0)
-
-        real_ber = tf.stack(averaged_real_ber, axis=0)
-
-        ber_data = {
-            'Eb/N0 (dB)': ebno_dbs,
-            'BER LS': ls_ber.numpy(),
-            'BER MMSE': mmse_ber.numpy(),
-            'BER GMM Circulant': gmm_circulant_ber.numpy(),
-            'BER GMM Full': gmm_full_ber.numpy(),
-            'BER Sample Covariance': sample_cov_ber.numpy(),
-            'BER Real': real_ber.numpy()
-        }
-
-        df = pd.DataFrame(ber_data)
-
-
-        base_dir = './simulation_results/ber'
-
-        # Subdirectories for CSV and plots
-        csv_dir = os.path.join(base_dir, 'csv')
-        plots_dir = os.path.join(base_dir, 'plots')
-
-        # Create these directories if they don't exist
-        os.makedirs(csv_dir, exist_ok=True)
-        os.makedirs(plots_dir, exist_ok=True)
-
-        # Define full paths for the CSV file and plot image
-        sim_results_csv = os.path.join(csv_dir, f"BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{monte_carlo_iterations}x{code}x{code_rate}{'xlist' if (code == 'polar') else ''}x{step_size}.csv")
-        sim_results_plot = os.path.join(plots_dir, f"BER_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}x{monte_carlo_iterations}x{code}x{code_rate}{'xlist' if (code == 'polar') else ''}x{step_size}.png")
-
-        # Save the DataFrame and the plot
-        df.to_csv(sim_results_csv, index=False)
-
-        # plot all three ber curves over ebno_db
+    def plot_results(self, plots_dir):
+        """Plot the simulation results."""
+        path = os.path.join(plots_dir, f"BER_{self.config['n_antennas']}x{self.config['n_coherence']}x{self.config['batch_size']}x{self.config['n_gmm_components']}x{self.config['monte_carlo_iterations']}x{self.config['code']}x{self.config['code_rate']}{'xlist' if (self.config['code'] == 'polar') else ''}x{self.config['n_blocks']}.png")
         plt.figure()
-        plt.plot(ebno_dbs, ls_ber.numpy(), label='LS')
-        plt.plot(ebno_dbs, mmse_ber.numpy(), label='MMSE')
-        plt.plot(ebno_dbs, gmm_circulant_ber.numpy(), label='GMM Circulant')
-        plt.plot(ebno_dbs, gmm_full_ber.numpy(), label='GMM Full')
-        plt.plot(ebno_dbs, sample_cov_ber.numpy(), label='Sample Covariance')
-        plt.plot(ebno_dbs, real_ber.numpy(), label='Real')
+        for est in self.estimators:
+            plt.plot(self.config['ebno_dbs'], self.results[est], label=f'{est.upper()} BER')
         plt.xlabel('Eb/N0 [dB]')
-        plt.ylabel('BER')
+        plt.ylabel(self.config['output_quantity'].upper())
         plt.yscale('log')
         plt.legend()
-        plt.savefig(sim_results_plot)
-        plt.show()
-        return
+        plt.savefig(path)
+
+    def save_results(self, csv_dir):
+        """Save the simulation results to CSV."""
+        path = os.path.join(csv_dir, f"BER_{self.config['n_antennas']}x{self.config['n_coherence']}x{self.config['batch_size']}x{self.config['n_gmm_components']}x{self.config['monte_carlo_iterations']}x{self.config['code']}x{self.config['code_rate']}{'xlist' if (self.config['code'] == 'polar') else ''}x{self.config['n_blocks']}.csv")
+        data = {'Eb/N0 (dB)': self.config['ebno_dbs']}
+        for est in self.estimators:
+            print('results: ', self.results[est])
+            print('results length: ', len(self.results[est]))
+            data[f"{est.upper()} {self.config['output_quantity'].upper()}"] = self.results[est]
+            print('data: ', data)
+        df = pd.DataFrame(data)
+        df.to_csv(path, index=False)
+
+    # The following methods are used to run BER simulation for different numbers of GMM Components
+    def run_gmm_full_comparison(self, gmm_components):
+        """Run simulations for 'gmm_full' with different numbers of GMM components."""
+        self.gmm_results = {}
+        base_params = {
+            'num_bits_per_symbol': self.config['num_bits_per_symbol'],
+            'block_length': self.config['block_length'],
+            'n_coherence': self.config['n_coherence'],
+            'n_antennas': self.config['n_antennas'],
+            'code_rate': self.config['code_rate'],
+            'code': self.config['code'],
+            'n_blocks': self.config['n_blocks'],
+            'training_batch_size': 100000,
+            'covariance_type': 'full',
+            'output_quantity': self.config['output_quantity']
+        }
+
+        # Iterate over each GMM component setting
+        for comp in gmm_components:
+            print(f"Running GMM Full with {comp} components")
+            params = base_params.copy()
+            params['n_gmm_components'] = comp
+            self.models['gmm_full'] = e2e(estimator='gmm', **params)
+
+            # Initialize results storage for this component count
+            self.gmm_results[comp] = []
+
+            for j, ebno_db in enumerate(self.config['ebno_dbs']):
+                print(f"Simulating Eb/N0 = {ebno_db} dB for {comp} components")
+                self.simulate_ber_estimator('gmm_full', ebno_db, j)
+                # Collect results specifically for this component count and Eb/N0
+                self.gmm_results[comp].append(self.results['gmm_full'][j])
         
-    elif output_quantity == 'nmse':
-        uncoded_e2e_model_nmse_ls = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            estimator='ls',
-            output_quantity='nmse'
-        )
+        self.plot_gmm_full_results(gmm_components)
+        self.save_gmm_full_results(gmm_components)
 
-        uncoded_e2e_model_nmse_mmse = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            estimator='mmse',
-            output_quantity='nmse'
-        )
-
-        uncoded_e2e_model_nmse_gmm_circulant = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            training_batch_size=30000,
-            covariance_type='circulant',
-            n_gmm_components=n_gmm_components,
-            estimator='gmm',
-            output_quantity='nmse'
-        )
-
-        uncoded_e2e_model_nmse_gmm_full = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas, 
-            training_batch_size=100000,
-            covariance_type='full',
-            n_gmm_components=n_gmm_components,
-            estimator='gmm',
-            output_quantity='nmse',
-            gmm_max_iterations=1000
-        )
-
-        uncoded_e2e_model_nmse_sample_cov = e2e(
-            num_bits_per_symbol=num_bits_per_symbol, 
-            block_length=block_length, 
-            n_coherence=n_coherence, 
-            n_antennas=n_antennas,
-            training_batch_size=100000,
-            covariance_type='full',
-            n_gmm_components=1,
-            estimator='gmm',
-            output_quantity='nmse'
-        )
-
-        vertically_stacked_nmse_list_ls = []
-        vertically_stacked_nmse_list_mmse = []
-        vertically_stacked_nmse_list_gmm_circulant = []
-        vertically_stacked_nmse_list_gmm_full = []
-        vertically_stacked_nmse_list_sample_cov = []
-
-        for j in range(iterations):
-            vertically_stacked_h_j, vertically_stacked_h_hat_j = uncoded_e2e_model_nmse_ls(batch_size=batch_size, ebno_db=(-5 + 2*j))
-            vertically_stacked_nmse_list_ls.append(tf.reduce_sum(tf.square(tf.abs(vertically_stacked_h_j - vertically_stacked_h_hat_j))) / (batch_size * n_antennas))
-
-            vertically_stacked_h_j, vertically_stacked_h_hat_j = uncoded_e2e_model_nmse_mmse(batch_size=batch_size, ebno_db=(-5 + 2*j))
-            vertically_stacked_nmse_list_mmse.append(tf.reduce_sum(tf.square(tf.abs(vertically_stacked_h_j - vertically_stacked_h_hat_j))) / (batch_size * n_antennas))
-
-            vertically_stacked_h_j, vertically_stacked_h_hat_j = uncoded_e2e_model_nmse_gmm_circulant(batch_size=batch_size, ebno_db=(-5 + 2*j))
-            vertically_stacked_nmse_list_gmm_circulant.append(tf.reduce_sum(tf.square(tf.abs(vertically_stacked_h_j - vertically_stacked_h_hat_j))) / (batch_size * n_antennas))
-           
-            vertically_stacked_h_j, vertically_stacked_h_hat_j = uncoded_e2e_model_nmse_gmm_full(batch_size=batch_size, ebno_db=(-5 + 2*j))
-            vertically_stacked_nmse_list_gmm_full.append(tf.reduce_sum(tf.square(tf.abs(vertically_stacked_h_j - vertically_stacked_h_hat_j))) / (batch_size * n_antennas))
-
-            vertically_stacked_h_j, vertically_stacked_h_hat_j = uncoded_e2e_model_nmse_sample_cov(batch_size=batch_size, ebno_db=(-5 + 2*j))
-            vertically_stacked_nmse_list_sample_cov.append(tf.reduce_sum(tf.square(tf.abs(vertically_stacked_h_j - vertically_stacked_h_hat_j))) / (batch_size * n_antennas))
-
-        nmse_ls = tf.stack(vertically_stacked_nmse_list_ls, axis=0)
-
-        nmse_mmse = tf.stack(vertically_stacked_nmse_list_mmse, axis=0)
-
-        nmse_gmm_circulant = tf.stack(vertically_stacked_nmse_list_gmm_circulant, axis=0)
-
-        nmse_gmm_full = tf.stack(vertically_stacked_nmse_list_gmm_full, axis=0)
-
-        nmse_sample_cov = tf.stack(vertically_stacked_nmse_list_sample_cov, axis=0)
-
-        nmse_data = {
-            'Eb/N0 (dB)': ebno_dbs,
-            'NMSE LS': nmse_ls.numpy(),
-            'NMSE MMSE': nmse_mmse.numpy(),
-            'NMSE GMM Circulant': nmse_gmm_circulant.numpy(),
-            'NMSE GMM Full': nmse_gmm_full.numpy(),
-            'NMSE Sample Covariance': nmse_sample_cov.numpy()
-        }
-
-        df = pd.DataFrame(nmse_data)
-
-
-        base_dir = './simulation_results/nmse'
-
-        # Subdirectories for CSV and plots
-        csv_dir = os.path.join(base_dir, 'csv')
-        plots_dir = os.path.join(base_dir, 'plots')
-
-        # Create these directories if they don't exist
-        os.makedirs(csv_dir, exist_ok=True)
-        os.makedirs(plots_dir, exist_ok=True)
-
-        # Define full paths for the CSV file and plot image
-        sim_results_csv = os.path.join(csv_dir, f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.csv')
-        sim_results_plot = os.path.join(plots_dir, f'NMSE_{n_antennas}x{n_coherence}x{batch_size}x{n_gmm_components}.png')
-
-        # Save the DataFrame and the plot
-        df.to_csv(sim_results_csv, index=False)
-
-        # plot all three nmse curves over ebno_db
+    def plot_gmm_full_results(self, gmm_components):
+        """Plot the BER results for the GMM Full estimator across different component counts."""
         plt.figure()
-        plt.plot(ebno_dbs, nmse_ls.numpy(), label='LS')
-        plt.plot(ebno_dbs, nmse_mmse.numpy(), label='MMSE')
-        plt.plot(ebno_dbs, nmse_gmm_circulant.numpy(), label='GMM Circulant')
-        plt.plot(ebno_dbs, nmse_gmm_full.numpy(), label='GMM Full')
-        plt.plot(ebno_dbs, nmse_sample_cov.numpy(), label='Sample Covariance')
+        for comp in gmm_components:
+            plt.plot(self.config['ebno_dbs'], self.gmm_results[comp], label=f'GMM Full {comp} Components')
         plt.xlabel('Eb/N0 [dB]')
-        plt.ylabel('NMSE')
-        plt.yscale('log')
+        plt.ylabel('BER' if self.config['output_quantity'] == 'ber' else 'NMSE')
+        plt.yscale('log' if self.config['output_quantity'] == 'ber' else 'linear')
+        plt.title('GMM Full Performance Comparison')
         plt.legend()
-        plt.savefig(sim_results_plot)
-        plt.show()
-        return
+        plt.savefig(f"{self.config['base_dir']}/gmm_full_comparison.png")
+
+    def save_gmm_full_results(self, gmm_components):
+        """Save the GMM Full simulation results to CSV."""
+        data = {'Eb/N0 (dB)': self.config['ebno_dbs']}
+        for comp in gmm_components:
+            data[f'GMM Full {comp} {self.config["output_quantity"].upper()}'] = self.gmm_results[comp]
+        df = pd.DataFrame(data)
+        df.to_csv(f"{self.config['base_dir']}/gmm_full_comparison.csv", index=False)
+
+def __main__():
+    config = {
+        'num_bits_per_symbol': 2,
+        'block_length': 256,
+        'ebno_db_min': -5.0,
+        'ebno_db_max': 15.0,
+        'batch_size': 500,
+        'n_coherence': 1,
+        'n_antennas': 64,
+        'n_gmm_components': 32,
+        'iterations': 11,
+        'ebno_dbs': np.linspace(-5.0, 15.0, 11),
+        'code_rate': 0.5,
+        'code': 'ldpc',
+        'monte_carlo_iterations': 100,
+        'n_target_block_errors': 250,
+        'n_blocks': 5,
+        'output_quantity': 'ber',  # Change this to 'nmse' for NMSE simulations, to 'ber' for BER Simulation
+        'datatype': '3gpp', # Change this to '3gpp' for using 3gpp channels, 'measurement' for measured channels
+        'base_dir': './simulation_results',
+    }
+    simulation_type = 'all'  # Change this to 'gmm_full' to run GMM Full comparison or to 'all' to compare all estimators
     
+    csv_dir = os.path.join(config['base_dir'], config['output_quantity'], 'csv')
+    plots_dir = os.path.join(config['base_dir'], config['output_quantity'], 'plots')
+    os.makedirs(csv_dir, exist_ok=True)
+    os.makedirs(plots_dir, exist_ok=True)
+
+    simulation = BER_NMSE_Simulation(config)
+
+    if simulation_type == 'gmm_full':
+        simulation.run_gmm_full_comparison([1, 2, 4, 8, 16, 32, 64])
+    elif simulation_type == 'all':
+        simulation.run_simulation()
+        simulation.save_results(csv_dir)
+        simulation.plot_results(plots_dir)
+
 if __name__ == "__main__":
     __main__()
